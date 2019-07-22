@@ -91,23 +91,25 @@ function treatNewStableUnits(arrUnits){
 
 			var payloads =	await dagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1",[new_unit.unit]);
 
-			async function setLastUpdatedMciAndBalanceAndOthersFields(event_id, fields){
+			var channel = channels[0];
+			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
+			console.log("payload: " + payload);
+
+			async function setLastUpdatedMciAndEventIdAndOthersFields(fields){
 				var strSetFields  = "";
 				if (fields)
 					for (var key in fields){
 						strSetFields+= ","+key+"='" + fields[key] + "'";
 					}
-				await appDB.query("UPDATE channels SET last_updated_mci=?,last_event_id=?"+strSetFields+" WHERE aa_address=? AND last_event_id<?",[new_unit.main_chain_index,event_id, new_unit.author_address,event_id]);
+				await appDB.query("UPDATE channels SET last_updated_mci=?,last_event_id=?"+strSetFields+" WHERE aa_address=? AND last_event_id<?",[new_unit.main_chain_index,payload.event_id, new_unit.author_address,payload.event_id]);
 			}
 
-			var channel = channels[0];
-			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
-			console.log("payload: " + payload);
+
 
 			//channel is open and received funding
 			if (payload && payload.open){
 				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
-				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "open", period: payload.period, amount_deposited_by_peer:payload[channel.peer_address], amount_deposited_by_me:payload[my_address]})
+				await setLastUpdatedMciAndEventIdAndOthersFields({status: "open", period: payload.period, amount_deposited_by_peer:payload[channel.peer_address], amount_deposited_by_me:payload[my_address]})
 				if (payload[my_address] > 0)
 					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
 				else
@@ -127,11 +129,11 @@ function treatNewStableUnits(arrUnits){
 						confirmClosing(new_unit.author_address, payload.period, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
-				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: status, period: payload.period, close_timestamp: new_unit.timestamp});
+				await setLastUpdatedMciAndEventIdAndOthersFields({status: status, period: payload.period, close_timestamp: new_unit.timestamp});
 			}
 			//AA confirms that channel is closed
 			if (payload && payload.closed){
-				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "closed", period: payload.period,amount_spent_by_peer:0, amount_spent_by_me:0, amount_deposited_by_peer:0, amount_deposited_by_me: 0, last_message_from_peer:''});
+				await setLastUpdatedMciAndEventIdAndOthersFields({status: "closed", period: payload.period,amount_spent_by_peer:0, amount_spent_by_me:0, amount_deposited_by_peer:0, amount_deposited_by_me: 0, last_message_from_peer:''});
 				const rows = await dagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?",[new_unit.unit, my_address]);
 				if (payload.fraud_proof)
 					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
@@ -143,7 +145,7 @@ function treatNewStableUnits(arrUnits){
 				const result = await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
 				if (result.affectedRows !== 0)
 					eventBus.emit("refused_deposit", payload.trigger_unit);
-				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {});
+				await setLastUpdatedMciAndEventIdAndOthersFields({});
 			}
 		}
 		unlock();
@@ -259,29 +261,29 @@ async function confirmClosingIfTimeoutReached(){
 			if (new_unit.amount && new_unit.amount >= 1e5 && (new_unit.output_address == my_address || new_unit.output_address == channel.peer_address)){
 				console.log("first condition met");
 				if (channel.status=='close_initiated_by_me' || channel.status=='close_initiated_by_peer')
-					await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+					await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 				else if (new_unit.output_address == my_address)
-					await setLastUpdatedMciAndBalanceAndOthersFields(true,{status:"open", amount_deposited_by_me: channel.amount_deposited_by_me + new_unit.amount});
+					await setLastUpdatedMciAndEventIdAndOthersFields(true,{status:"open", amount_deposited_by_me: channel.amount_deposited_by_me + new_unit.amount});
 				else if (new_unit.output_address == channel.peer_address)
-					await setLastUpdatedMciAndBalanceAndOthersFields(true,{status:"open", amount_deposited_by_peer: channel.amount_deposited_by_peer + new_unit.amount});
+					await setLastUpdatedMciAndEventIdAndOthersFields(true,{status:"open", amount_deposited_by_peer: channel.amount_deposited_by_peer + new_unit.amount});
 
 			} else if ( (new_unit.output_address == my_address || new_unit.output_address == channel.peer_address)	
 			 && payload && payload.close && channel.status !='close_initiated_by_peer' && channel.status !='close_initiated_by_me' ){//second condition
 				var transferredFromMe = payload.transferredFromMe || 0;
 				if (transferredFromMe < 0)
-					await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+					await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 				else if (payload && typeof payload.sentByPeer == 'object'){
 						if (payload.sentByPeer.signed_message != 'object')
-							await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 						else if (payload.sentByPeer.signed_message && payload.sentByPeer.signed_message.channel != channel.address)
-							await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 						else if (payload.sentByPeer.signed_message && payload.sentByPeer.signed_message.period !== channel.period)
-							await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 						else if (new_unit.output_address == my_address && !await promiseValidateSignedMessage(payload.sentByPeer.signed_message, my_address)||
 						new_unit.output_address == channel.peer_address && !await promiseValidateSignedMessage(payload.sentByPeer.signed_message, channel.peer_address))
-							await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 						else if (!payload.sentByPeer.signed_message.amount_spent || payload.sentByPeer.signed_message.amount_spent < 0)
-							await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 						else
 							var transferredFromPeer = payload.sentByPeer.signed_message.amount_spent;
 						} else{
@@ -289,22 +291,22 @@ async function confirmClosingIfTimeoutReached(){
 							var my_final_balance = channel.amount_deposited_by_me - transferredFromMe + transferredFromPeer;
 							var peer_final_balance =  channel.amount_deposited_by_peer- transferredFromPeer + transferredFromMe;
 							if (my_final_balance < 0 || peer_final_balance < 0)
-								await setLastUpdatedMciAndBalanceAndOthersFields(false, false);
+								await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
 							else 
-								await setLastUpdatedMciAndBalanceAndOthersFields(true, );
+								await setLastUpdatedMciAndEventIdAndOthersFields(true, );
 
 
 						}
 					console.log("payload " + JSON.stringify(payloads));
 
 					if (!payloads[0] || !payloads[0].payload) {
-						setLastUpdatedMciAndBalanceAndOthersFields();
+						setLastUpdatedMciAndEventIdAndOthersFields();
 						console.log("no message in " + new_unit.unit);
 					} else {
 					try{
 						var payload = JSON.parse(payloads[0].payload);
 					} catch (e) {
-						setLastUpdatedMciAndBalanceAndOthersFields();
+						setLastUpdatedMciAndEventIdAndOthersFields();
 						console.log("invalid payload" + e);
 					}
 					if (payload && payload.close && payload.transferredFromMe >=0 && new_unit.author_address == channel.client_address){

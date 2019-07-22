@@ -38,10 +38,14 @@ if (!conf.isHighAvaibilityNode) { // if another node is used as watcher, it is i
 	require('./sql/create_sqlite_tables.js');
 }
 
+if (conf.isHighAvaibilityNode){
+	setTimeout(init, 1000);
 
-eventBus.once('headless_wallet_ready', function(){
-		setTimeout(init, 1000);
-});
+} else {
+	eventBus.once('headless_wallet_ready', function(){
+			setTimeout(init, 1000);
+	});
+}
 
 async function init(){
 
