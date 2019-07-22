@@ -22,35 +22,60 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 				{ // refill the AA
 					if: `{ $bFromParties AND trigger.output[[asset=base]] >= 1e5 }`,
 					init: `{
-						if (var['close_initiated_by'])
-							bounce('already closing');
+						if (var['close_initiated_by']){
+							$refused=1;
+						} else {
 						if (!var['period'])
 							$period = 1;
 						else
 							$period = var['period'];
+						}
 					}`,
 					messages: [{
+						if:"{!$refused}",
 						app: 'data',
 						payload: {
 							open: 1,
 							period: "{$period}",
 							"{$addressA}":"{var['balanceA'] + ($party == 'A' ? trigger.output[[asset=base]] : 0)}",
 							"{$addressB}":"{var['balanceB'] + ($party == 'B' ? trigger.output[[asset=base]] : 0)}",
-							event_id :"{var['event_id'] otherwise 1}"
+							event_id :"{var['event_id'] otherwise 1}",
+							trigger_unit: "{trigger.unit}"
+						}
+					},
+					{
+						if:"{$refused}",
+						app: 'data',
+						payload: {
+							refused: 1,
+							trigger_unit: "{trigger.unit}",
+							event_id :"{var['event_id'] otherwise 1}",
+						}
+					},
+					{
+						if:"{$refused}",
+						app: 'payment',
+						payload: {
+							asset: "base",
+							outputs: [
+								{address: "{trigger.address}", amount: "{trigger.output[[asset=base]]}"}
+							]
 						}
 					},
 						{
 							app: 'state',
 							state: `{
-								if (!var['period'])
-									var['period'] = 1;
 								if (!var['event_id'])
 									var['event_id'] = 2;
 								else
 									var['event_id'] += 1;
-								$key = 'balance' || $party;
-								var[$key] += trigger.output[[asset=base]];
-								response[$key] = var[$key];
+								if (!$refused){
+									if (!var['period'])
+									var['period'] = 1;
+									$key = 'balance' || $party;
+									var[$key] += trigger.output[[asset=base]];
+									response[$key] = var[$key];
+								}
 							}`
 						}
 					]

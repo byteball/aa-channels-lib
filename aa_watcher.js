@@ -50,7 +50,7 @@ async function updateAddressesToWatch(){
 }
 
 
-async function getSqlFilterForNewOutputsFromChannels(){
+async function getSqlFilterForNewUnitsFromChannels(){
 	return new Promise(async (resolve, reject) => {
 		const rows = await appDB.query("SELECT peer_address,last_updated_mci,aa_address FROM channels");
 		var string = rows.length > 0 ? " (" : " 0 AND ";
@@ -74,7 +74,7 @@ function treatNewStableUnits(arrUnits){
 	const new_units = await dagDB.query("SELECT timestamp,units.unit,outputs.address AS output_address,outputs.amount,main_chain_index,unit_authors.address AS author_address FROM units \n\
 		CROSS JOIN outputs USING(unit)\n\
 		CROSS JOIN unit_authors USING(unit)\n\
-		WHERE "+unitFilter+ await getSqlFilterForNewOutputsFromChannels() + " outputs.asset IS NULL AND is_stable=1 AND sequence='good' GROUP BY units.unit ORDER BY main_chain_index, units.unit, output_address ASC");
+		WHERE "+unitFilter+ await getSqlFilterForNewUnitsFromChannels() + " outputs.asset IS NULL AND is_stable=1 AND sequence='good' GROUP BY units.unit ORDER BY main_chain_index, units.unit, output_address ASC");
 		if (new_units.length === 0){
 			unlock();
 			return console.log("nothing concerns payment channel in these units");
@@ -99,10 +99,11 @@ function treatNewStableUnits(arrUnits){
 
 			var channel = channels[0];
 			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
-			console.log("payload: " + payloads[0].payload);
+			console.log("payload: " + payload);
 
 			//channel is open and received funding
 			if (payload && payload.open){
+				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "open", period: payload.period, amount_deposited_by_peer:payload[channel.peer_address], amount_deposited_by_me:payload[my_address]})
 			}
 
@@ -123,6 +124,11 @@ function treatNewStableUnits(arrUnits){
 			//AA confirms that channel is closed
 			if (payload && payload.closed){
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "closed", period: payload.period,amount_spent_by_peer:0, amount_spent_by_me:0, amount_deposited_by_peer:0, amount_deposited_by_me: 0, last_message_from_peer:''});
+			}
+
+			if (payload && payload.refused){
+				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
+				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {});
 			}
 		}
 		unlock();

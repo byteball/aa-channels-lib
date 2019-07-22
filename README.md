@@ -13,7 +13,7 @@ The communication between them can be configured either as HTTPS or as the encry
 
 One peer initiates the creation with:
 ```
-channel.createNewChannel(url or pairing address, initial amount, {
+channel.createNewChannel(url or pairing address, initial deposit, {
 		ifOK: function(aa_address){
 			//aa_address is the address of the created channel
 		},
@@ -21,7 +21,7 @@ channel.createNewChannel(url or pairing address, initial amount, {
 		}
 	}
 ```
-An url or a pairing address is provided depending of the chosen communication layer, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with the indicated initial amount. Then the AA address is returned by the function, this is to be saved as it will used to identify channel for further operation.
+An url or a pairing address is provided depending of the chosen communication layer, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. Then the AA address is returned by the function, this is to be saved as it will used to identify channel for further operation.
 Once the payment channel is opened and confirmed by Obyte network, transactions can begin.
 
 One peer wanting to send an offchain payment uses this function:

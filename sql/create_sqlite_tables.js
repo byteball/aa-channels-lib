@@ -20,8 +20,8 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
-	auto_fill_threshold INTEGER DEFAULT 0,\n\
-	auto_fill_amount INTEGER DEFAULT 0,\n\
+	auto_refill_threshold INTEGER DEFAULT 0,\n\
+	auto_refill_amount INTEGER DEFAULT 0,\n\
 	close_timestamp INTEGER,\n\
 	period INTEGER DEFAULT 1,\n\
 	last_message_from_peer TEXT,\n\
@@ -32,7 +32,13 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
 );");
 
-
+db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\
+	aa_address CHAR(32) NOT NULL, \n\
+	amount INTEGER NOT NULL,\n\
+	unit CHAR(44) NOT NULL,\n\
+	is_confirmed_by_aa TINYINT DEFAULT 0,\n\
+	UNIQUE (aa_address, unit)\n\
+);");
 
 db.query("CREATE TABLE IF NOT EXISTS channels_config (\n\
 	my_address CHAR(32) \n\

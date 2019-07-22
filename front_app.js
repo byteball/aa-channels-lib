@@ -9,6 +9,7 @@ const isUrl = require('is-url');
 const crypto = require('crypto');
 const correspondents = require('./modules/correspondents.js');
 const request = require('request');
+const async = require('async');
 
 
 if (!conf.isHighAvaibilityNode) {
@@ -27,10 +28,10 @@ var paymentReceivedCallback;
 var assocResponseByTag = {};
 var my_address;
 
-if (!conf.isHighAvaibilityNode) { 
-	var appDB = require('ocore/db.js');
-} else{
+if (conf.isHighAvaibilityNode) { 
 	var appDB = require('ocore/db.js');// to be replaced by external DB
+} else{
+	var appDB = require('ocore/db.js');
 }
 
 if (!conf.isHighAvaibilityNode) { // if another node is used as watcher, it is in charge to create table
@@ -68,7 +69,7 @@ async function init(){
 	}
 
 	if (conf.enabledComLayers.includes('http') && conf.isHttpServer){
-		console.log("com layer obyte-messenger enabled");
+		console.log("com layer http enabled");
 
 		const express = require('express')
 		const app = express()
@@ -76,7 +77,6 @@ async function init(){
 		app.use(require('body-parser').json());
 		app.post('/post', function(request, response){
 			console.error(JSON.stringify(request.body));
-
 			if (typeof request != 'object' || typeof request.body != 'object')
 				return response.send({error: "bad request"});
 			else 
@@ -86,6 +86,8 @@ async function init(){
 		});
 		app.listen(conf.httpDefaultPort);
 		}
+
+		setInterval(autoRefillChannels, 30000);
 }
 
 
@@ -164,15 +166,15 @@ function treatPaymentFromPeer(objRequest, handle){
 function createNewChannelOnPeerRequest(objRequest, handle){
 	console.error(JSON.stringify(objRequest));
 	const objAAParameters= aaDefinitions.getAddressAndParametersForAA(my_address, objRequest.params.address, objRequest.params.salt);
-		appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (aa_address,version,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?)",
-		[objAAParameters.aa_address, objAAParameters.version, objRequest.params.salt, objRequest.params.address, objRequest.from_address, objRequest.url], function(result){
+	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (aa_address,version,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?)",
+	[objAAParameters.aa_address, objAAParameters.version, objRequest.params.salt, objRequest.params.address, objRequest.from_address, objRequest.url], function(result){
 
-			if (result.affectedRows !== 1)
-				return handle({error:"this salt already exists"});
-			else
-				return handle({response: objAAParameters});
+		if (result.affectedRows !== 1)
+			return handle({error:"this salt already exists"});
+		else
+			return handle({response: objAAParameters});
 
-		});
+	});
 }
 
 
@@ -193,6 +195,10 @@ async function close(aa_address, handle){
 			},
 			ifError: (error)=>{
 				handle("error when closing channel " + error);
+			},
+			preCommitCb: function(conn, objJoint, cb){
+				conn.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=?",[aa_address]);
+				cb();
 			},
 			ifOk: function(objJoint){
 				network.broadcastJoint(objJoint);
@@ -227,38 +233,61 @@ async function close(aa_address, handle){
 }
 
 
-function fund(aa_address, amount, handle){
+function deposit(aa_address, amount, handle){
 	if (conf.isHighAvaibilityNode)
 		return handle("high availability node can only receive funds");
 	if (!validationUtils.isPositiveInteger(amount))
 		return handle("amount must be positive integer");
 	if (amount < 1e5)
 		return handle("amount must be >= 1e5");
-
-	const composer = require('ocore/composer.js');
-	const network = require('ocore/network.js');
-	const callbacks = composer.getSavingCallbacks({
-		ifNotEnoughFunds: ()=>{
-			handle("not enough fund to fund chanel");
-		},
-		ifError: (error)=>{
-			handle("not enough fund " + error);
-		},
-		ifOk: function(objJoint){
-			network.broadcastJoint(objJoint);
-			handle(null);
+	mutex.lock([aa_address], async function(unlock){
+		const channels = await appDB.query("SELECT status FROM channels WHERE aa_address=?",[aa_address]);
+		if (channels.length != 1){
+			unlock();
+			return handle ("unknown channel");
 		}
-	})
-	composer.composeJoint({
-		paying_addresses: [my_address], 
-		outputs: [{address: my_address, amount: 0}, {address: aa_address, amount: amount}], 
-		signer: headlessWallet.signer, 
-		callbacks: callbacks
+
+		if (channels[0].status != "open" && channels[0].status != "closed"){
+			unlock();
+			return handle("channel status: "+  channels[0].status+ ", no deposit possible");
+		}
+
+		const composer = require('ocore/composer.js');
+		const network = require('ocore/network.js');
+		const callbacks = composer.getSavingCallbacks({
+			ifNotEnoughFunds: ()=>{
+				unlock();
+				handle("not enough fund to fund chanel");
+			},
+			ifError: (error)=>{
+				unlock();
+				handle("not enough fund " + error);
+			},
+			preCommitCb: function(conn, objJoint, cb){
+				conn.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)",[objJoint.unit.unit, amount, aa_address]);
+				cb();
+			},
+			ifOk: function(objJoint){
+				network.broadcastJoint(objJoint);
+				unlock();
+				handle(null);
+			}
+		})
+		composer.composeJoint({
+			paying_addresses: [my_address], 
+			outputs: [{address: my_address, amount: 0}, {address: aa_address, amount: amount}], 
+			signer: headlessWallet.signer, 
+			callbacks: callbacks
+		});
 	});
 }
 
 
 function createNewChannel(peer, initial_amount, callbacks){
+	if (conf.isHighAvaibilityNode)
+		return callbacks.ifError("high availability node cannot create channel");
+	if (!my_address)
+		return callbacks.ifError("not initialized");
 	if (!validationUtils.isPositiveInteger(initial_amount))
 		return callbacks.ifError("amount must be positive integer");
 	if (initial_amount < 1e5)
@@ -324,7 +353,7 @@ function createNewChannel(peer, initial_amount, callbacks){
 		if (result.affectedRows !== 1)
 			return handle("this salt already exists");
 		else{
-			sendDefinitionAndFillChannel(response.aa_address,objCalculatedAAParameters.arrDefinition, initial_amount).then(()=>{
+			sendDefinitionAndDepositToChannel(response.aa_address,objCalculatedAAParameters.arrDefinition, initial_amount).then(()=>{
 				return handle(null, response.aa_address);
 			},(error)=>{
 				return handle(error);
@@ -334,10 +363,11 @@ function createNewChannel(peer, initial_amount, callbacks){
 }
 
 function sendMessageAndPay(aa_address, message, amount,handle){
-
+	if (conf.isHighAvaibilityNode)
+		return handle("high availability node can only receive payment");
 	if (!my_address)
 		return handle("not initialized");
-	mutex.lock(['pay_' + aa_address], async function(unlock){
+	mutex.lock([aa_address], async function(unlock){
 
 		function unlockAndHandle(error, response){
 			unlock();
@@ -393,6 +423,16 @@ function sendMessageAndPay(aa_address, message, amount,handle){
 	});
 }
 
+function signMessage(message, address) {
+	return new Promise((resolve, reject) => {
+			signedMessage.signMessage(message, address, headlessWallet.signer, false, function (err, objSignedPackage) {
+					if (err)
+							return reject(err);
+					resolve(objSignedPackage);
+			});
+	});
+}
+
 
 function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, timeOutCb) {
 	const tag = crypto.randomBytes(30).toString('hex');
@@ -406,7 +446,7 @@ function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, time
 			json: objToBeSent
 		}, (error, res, body) => {
 			if (error || res.statusCode != 200) {
-				return console.error("error in response from peer: " + peer_address + " " + res.statusCode);
+				return console.error("error in response from peer: " + peer_address + " " + JSON.stringify(res));
 			}
 			if (assocResponseByTag[tag]) //if timeout not reached
 				delete assocResponseByTag[tag];
@@ -424,7 +464,7 @@ function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, time
 }
 
 
-function sendDefinitionAndFillChannel(aa_address, arrDefinition, filling_amount){
+function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_amount){
 	return new Promise(async (resolve, reject) => {
 
 		const payload = { address: aa_address, definition: arrDefinition };
@@ -438,8 +478,9 @@ function sendDefinitionAndFillChannel(aa_address, arrDefinition, filling_amount)
 			ifError: (error)=>{
 				reject("error when creating channel " + error);
 			},
-			preCommitCb: (conn, objJoint, handle)=>{
-				handle();
+			preCommitCb: function(conn, objJoint, cb){
+				conn.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)",[objJoint.unit.unit, filling_amount, aa_address]);
+				cb();
 			},
 			ifOk: function(objJoint){
 				network.broadcastJoint(objJoint);
@@ -470,23 +511,39 @@ function composeContentJointAndFill( amount, app, payload, callbacks){
 	});
 }
 
-
-
-
-function signMessage(message, address) {
-	return new Promise((resolve, reject) => {
-			signedMessage.signMessage(message, address, headlessWallet.signer, false, function (err, objSignedPackage) {
-					if (err)
-							return reject(err);
-					resolve(objSignedPackage);
+function autoRefillChannels(){
+	mutex.lock(["autoRefillChannels"], async function(unlock){
+	const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+	IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
+	FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold");
+		async.eachSeries(rows,function(row, cb){
+			deposit(row.aa_address, row.auto_refill_amount, function(error){
+				if (error)
+					console.log("error when auto refill " + error);
+				else
+					console.log("channel " + row.aa_address + " refilled with " + row.auto_refill_amount + " bytes");
+					return cb();
 			});
+		}, function(){
+			unlock();
+		});
 	});
 }
 
+async function setAutoRefill(aa_address, refill_amount, refill_threshold, handle){
+	const result = 	await appDB.query("UPDATE channels SET auto_refill_threshold=?,auto_refill_amount=? WHERE aa_address=?",[refill_threshold,refill_amount,aa_address]);
+
+	if (result.affectedRows !== 1)
+		return handle("aa_address not known");
+	else
+		return handle(null);
+
+}
 
 
+exports.setAutoRefill = setAutoRefill;
 exports.createNewChannel = createNewChannel;
-exports.fund = fund;
+exports.deposit = deposit;
 exports.sendMessageAndPay = sendMessageAndPay;
 exports.close = close;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
