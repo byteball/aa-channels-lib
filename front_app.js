@@ -229,8 +229,12 @@ async function close(aa_address, handle){
 			callbacks: callbacks
 		});
 	} else {
-		//todo order aa watcher to close channel
-
+		//order aa watcher to close channel
+		const result = await appDB.query("UPDATE channels SET closing_authored=1 FROM channels WHERE aa_address=?",[aa_address]);
+		if (result.affectedRows !== 1)
+			return handle("aa address not known");
+		else
+			return handle(null);
 	}
 }
 

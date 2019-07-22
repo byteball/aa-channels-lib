@@ -7,6 +7,7 @@ const eventBus = require('ocore/event_bus.js');
 const mutex = require('ocore/mutex.js');
 const headlessWallet = require('headless-obyte');
 const objectHash = require('ocore/object_hash.js');
+const async = require('async');
 
 
 if (!conf.isHighAvaibilityNode) {
@@ -37,7 +38,9 @@ eventBus.on('my_transactions_became_stable', function(arrUnits){
 
 function lookForAndProcessTasks(){
 	updateAddressesToWatch();
-	confirmClosingAfterTimeout();
+	confirmClosingIfTimeoutReached();
+	if (conf.isHighAvaibilityNode)
+		treatClosingRequests();
 }
 
 async function updateAddressesToWatch(){
@@ -148,6 +151,57 @@ function treatNewStableUnits(arrUnits){
 }
 
 
+function treatClosingRequests(){
+	mutex.lock(['treatClosingRequests'], async function(unlock){
+	const rows = await appDB.query("SELECT aa_address,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE closing_authored=1");
+		if (rows.length === 0)
+				return unlock();
+
+		async.eachSeries(rows,function(row, cb){
+			const composer = require('ocore/composer.js');
+			const network = require('ocore/network.js');
+			const callbacks = composer.getSavingCallbacks({
+				ifNotEnoughFunds: ()=>{
+					cb();
+				},
+				ifError: (error)=>{
+					cb();
+				},
+				ifOk: function(objJoint){
+					appDB.query("UPDATE channels SET status='closing_initiated_by_me',closing_authored=0 WHERE aa_address=?",[row.aa_address]);
+					network.broadcastJoint(objJoint);
+					cb();
+				}
+			})
+
+			const payload = { close: 1, period: row.period};
+			if (row.amount_spent_by_me > 0)
+				payload.transferredFromMe = row.amount_spent_by_me;
+			if (row.amount_spent_by_peer > 0)
+				payload.sentByPeer = JSON.parse(row.last_message_from_peer);
+
+			const objMessage = {
+				app: 'data',
+				payload_location: "inline",
+				payload_hash: objectHash.getBase64Hash(payload),
+				payload: payload
+			};
+
+			composer.composeJoint({
+				paying_addresses: [my_address], 
+				outputs: [{address: my_address, amount: 0}, {address: row.aa_address, amount: 10000}], 
+				signer: headlessWallet.signer,
+				messages: [objMessage],
+				callbacks: callbacks
+			});
+		},
+		function(){
+			unlock();
+		});
+
+	});
+}
+
 
 function confirmClosing(aa_address, period, fraud_proof){
 	const composer = require('ocore/composer.js');
@@ -190,7 +244,7 @@ function confirmClosing(aa_address, period, fraud_proof){
 	});
 }
 
-async function confirmClosingAfterTimeout(){
+async function confirmClosingIfTimeoutReached(){
 	const current_ts = Math.round(Date.now() / 1000);
 	const rows =	await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me' AND close_timestamp <?",[current_ts - 300]);
 	rows.forEach(function(row){
