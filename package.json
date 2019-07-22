@@ -2,7 +2,7 @@
   "name": "aa-channels-lib",
   "version": "1.0.0",
   "description": "Library for AA payment channels",
-  "main": "channel.js",
+  "main": "front_app.js",
   "license": "MIT",
   "dependencies": {
     "body-parser": "^1.19.0",
