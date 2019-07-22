@@ -17,4 +17,4 @@ exports.enabledComLayers = ['http','obyte-messenger'];
 exports.isHttpServer = false;
 exports.httpDefaultPort = 6800;
 
-console.log('finished AA-channel-libconf');
+console.log('finished AA-channel-lib conf');

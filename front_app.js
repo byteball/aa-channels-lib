@@ -152,8 +152,11 @@ function treatPaymentFromPeer(objRequest, handle){
 
 		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=? WHERE aa_address=?", [amount, JSON.stringify(objSignedPackage), objSignedMessage.channel]);
 		if (paymentReceivedCallback){
-				paymentReceivedCallback(amount, objRequest.params.message,channel.peer_address, function(response){
-					return handle({response: response});
+				paymentReceivedCallback(amount, objRequest.params.message,channel.peer_address, function(error, response){
+					if (error)
+						return handle({error: error});
+					else
+						return handle({response: response});
 				});
 			} else {
 				return handle({response:"received payment for " + amount });
