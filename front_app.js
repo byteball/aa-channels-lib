@@ -171,8 +171,10 @@ function createNewChannelOnPeerRequest(objRequest, handle){
 
 		if (result.affectedRows !== 1)
 			return handle({error:"this salt already exists"});
-		else
+		else{
+			eventBus.emit("channel_created_by_peer", objRequest.params.address, objAAParameters.aa_address);
 			return handle({response: objAAParameters});
+		}
 
 	});
 }
@@ -247,7 +249,7 @@ function deposit(aa_address, amount, handle){
 			return handle ("unknown channel");
 		}
 
-		if (channels[0].status != "open" && channels[0].status != "closed"){
+		if (channels[0].status != "open" && channels[0].status != "closed" && channels[0].status != "created"){
 			unlock();
 			return handle("channel status: "+  channels[0].status+ ", no deposit possible");
 		}
@@ -513,16 +515,18 @@ function composeContentJointAndFill( amount, app, payload, callbacks){
 
 function autoRefillChannels(){
 	mutex.lock(["autoRefillChannels"], async function(unlock){
-	const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
-	IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
-	FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold");
+		const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+		IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
+		FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold");
 		async.eachSeries(rows,function(row, cb){
 			deposit(row.aa_address, row.auto_refill_amount, function(error){
 				if (error)
 					console.log("error when auto refill " + error);
-				else
+				else {
 					console.log("channel " + row.aa_address + " refilled with " + row.auto_refill_amount + " bytes");
+					eventBus.emit("channel_refilled", row.aa_address, row.auto_refill_amount);
 					return cb();
+				}
 			});
 		}, function(){
 			unlock();
@@ -532,11 +536,20 @@ function autoRefillChannels(){
 
 async function setAutoRefill(aa_address, refill_amount, refill_threshold, handle){
 	const result = 	await appDB.query("UPDATE channels SET auto_refill_threshold=?,auto_refill_amount=? WHERE aa_address=?",[refill_threshold,refill_amount,aa_address]);
-
 	if (result.affectedRows !== 1)
 		return handle("aa_address not known");
 	else
 		return handle(null);
+}
+
+async function getBalances(aa_address, handle){
+	const rows = 	await appDB.query("SELECT amount_deposited_by_me,amount_spent_by_me, amount_spent_by_peer, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+	IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_deposits\n\
+	FROM channels WHERE channels.aa_address=?",[aa_address]);
+	if (rows.length === 0)
+		return handle("aa_address not known");
+	else
+		return handle(null,rows[0]);
 
 }
 
@@ -547,3 +560,4 @@ exports.deposit = deposit;
 exports.sendMessageAndPay = sendMessageAndPay;
 exports.close = close;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
+exports.getBalances = getBalances;

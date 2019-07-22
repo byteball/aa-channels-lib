@@ -71,10 +71,10 @@ async function getSqlFilterForNewUnitsFromChannels(){
 function treatNewStableUnits(arrUnits){	
 	mutex.lock(['treatNewStableUnits'], async (unlock)=>{
 	var unitFilter = arrUnits ? " units.unit IN("+arrUnits.map(dagDB.escape).join(',')+") AND " : ""; 
-	const new_units = await dagDB.query("SELECT timestamp,units.unit,outputs.address AS output_address,outputs.amount,main_chain_index,unit_authors.address AS author_address FROM units \n\
+	const new_units = await dagDB.query("SELECT timestamp,units.unit,outputs.amount,main_chain_index,unit_authors.address AS author_address FROM units \n\
 		CROSS JOIN outputs USING(unit)\n\
 		CROSS JOIN unit_authors USING(unit)\n\
-		WHERE "+unitFilter+ await getSqlFilterForNewUnitsFromChannels() + " outputs.asset IS NULL AND is_stable=1 AND sequence='good' GROUP BY units.unit ORDER BY main_chain_index, units.unit, output_address ASC");
+		WHERE "+unitFilter+ await getSqlFilterForNewUnitsFromChannels() + " outputs.asset IS NULL AND is_stable=1 AND sequence='good' GROUP BY units.unit ORDER BY main_chain_index ASC");
 		if (new_units.length === 0){
 			unlock();
 			return console.log("nothing concerns payment channel in these units");
@@ -82,7 +82,7 @@ function treatNewStableUnits(arrUnits){
 
 		for (var i=0; i<new_units.length; i++) {
 			var new_unit= new_units[i];
-			var channels = await appDB.query("SELECT * FROM channels WHERE aa_address=? OR aa_address=?",[new_unit.output_address, new_unit.author_address ]);
+			var channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?",[new_unit.author_address ]);
 			if (!channels[0])
 				throw Error("channel not found");
 
@@ -105,6 +105,11 @@ function treatNewStableUnits(arrUnits){
 			if (payload && payload.open){
 				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "open", period: payload.period, amount_deposited_by_peer:payload[channel.peer_address], amount_deposited_by_me:payload[my_address]})
+				if (payload[my_address] > 0)
+					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
+				else
+					eventBus.emit("peer_deposit_became_stable", payload[channel.peer_address], payload.trigger_unit);
+
 			}
 
 			//closing requested by one party
@@ -114,9 +119,9 @@ function treatNewStableUnits(arrUnits){
 				else {
 					var status = "closing_initiated_by_peer";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
-						confirmClosing(new_unit.output_address, payload.period); //peer is honest, we send confirmation for closing
+						confirmClosing(new_unit.author_address, payload.period); //peer is honest, we send confirmation for closing
 					} else {
-						confirmClosing(new_unit.output_address, payload.period, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+						confirmClosing(new_unit.author_address, payload.period, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: status, period: payload.period, close_timestamp: new_unit.timestamp});
@@ -124,10 +129,17 @@ function treatNewStableUnits(arrUnits){
 			//AA confirms that channel is closed
 			if (payload && payload.closed){
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {status: "closed", period: payload.period,amount_spent_by_peer:0, amount_spent_by_me:0, amount_deposited_by_peer:0, amount_deposited_by_me: 0, last_message_from_peer:''});
+				const rows = await dagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?",[new_unit.unit, my_address]);
+				if (payload.fraud_proof)
+					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
+				else
+					eventBus.emit("channel_closed", new_unit.author_address, rows[0] ? rows[0].amount : 0);
 			}
 
 			if (payload && payload.refused){
-				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
+				const result = await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?",[payload.trigger_unit]);
+				if (result.affectedRows !== 0)
+					eventBus.emit("refused_deposit", payload.trigger_unit);
 				await setLastUpdatedMciAndBalanceAndOthersFields(payload.event_id, {});
 			}
 		}
@@ -157,9 +169,9 @@ function confirmClosing(aa_address, period, fraud_proof){
 	})
 
 	if (fraud_proof){
-		var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof)};
+		var payload = {fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof)};
 	} else {
-		var payload = { confirm: 1, period: period};
+		var payload = {confirm: 1, period: period};
 	}
 
 	const objMessage = {

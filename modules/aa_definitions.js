@@ -214,6 +214,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 							app: 'data',
 							payload: {
 								closed: 1,
+								fraud_proof: 1,
 								period: "{var['period']}",
 								event_id :"{var['event_id']}"
 							},
