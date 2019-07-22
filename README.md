@@ -13,7 +13,7 @@ The communication between them can be configured either as HTTPS or as the encry
 
 One peer initiates the creation with:
 ```
-channel.createNewChannel(url or pairing address, initial deposit, {
+channels.createNewChannel(url or pairing address, initial deposit, {
 		ifOK: function(aa_address){
 			//aa_address is the address of the created channel
 		},
@@ -21,13 +21,13 @@ channel.createNewChannel(url or pairing address, initial deposit, {
 		}
 	}
 ```
-An url or a pairing address is provided depending of the chosen communication layer, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. Then the AA address is returned by the function, this is to be saved as it will used to identify channel for further operation.
+An url or a pairing address is provided depending of the chosen communication layer, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. The AA address is then returned by the function and is to be saved as it will used to identify channel for further operation.
 Once the payment channel is opened and confirmed by Obyte network, transactions can begin.
 
 One peer wanting to send an offchain payment uses this function:
 
 ```
-channel.sendMessageAndPay(aa_address, "I want to pay for something", amount ,function(error, response){
+channels.sendMessageAndPay(aa_address, "I want to pay for something", amount ,function(error, response){
 	if (error)
 		return console.log(error);
 	else
@@ -38,7 +38,7 @@ The first parameter is the address of the channel provided during its creation, 
 
 You can set a function to be executed when you receive an offchain payment:
 ```
-	channel.setCallBackForPaymentReceived(function(amount, message, peer_address, handle){
+	channels.setCallBackForPaymentReceived(function(amount, message, peer_address, handle){
 		if (message == "thanks me")
 			return handle("Thank you " + peer_address + " I received you payment of " + amount + " bytes");
 		else
@@ -51,7 +51,7 @@ The response can be a number, a string or an object, and will be forwarded to th
 
 The channel can be closed an anytime by one of the party with:
 ```
-channel.close(aa_address, function(error){
+channels.close(aa_address, function(error){
 	if (error)
 		console.error(error);
 });

@@ -546,8 +546,8 @@ async function setAutoRefill(aa_address, refill_amount, refill_threshold, handle
 		return handle(null);
 }
 
-async function getBalances(aa_address, handle){
-	const rows = 	await appDB.query("SELECT amount_deposited_by_me,amount_spent_by_me, amount_spent_by_peer, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+async function getBalancesAndStatus(aa_address, handle){
+	const rows = 	await appDB.query("SELECT status,amount_deposited_by_me,amount_spent_by_me, amount_spent_by_peer, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
 	IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_deposits\n\
 	FROM channels WHERE channels.aa_address=?",[aa_address]);
 	if (rows.length === 0)
@@ -564,4 +564,4 @@ exports.deposit = deposit;
 exports.sendMessageAndPay = sendMessageAndPay;
 exports.close = close;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
-exports.getBalances = getBalances;
+exports.getBalancesAndStatus= getBalancesAndStatus;
