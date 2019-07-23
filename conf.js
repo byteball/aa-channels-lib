@@ -12,9 +12,10 @@ exports.aa_version = 1;
 
 exports.isHighAvaibilityNode =  false;
 
-exports.enabledComLayers = ['http','obyte-messenger'];
+exports.enabledReceivers = ['http','obyte-messenger']; //configure the communication layers that can receive a message from peer
+// if 'http' is present, a http server will start to listen at port httpDefaultPort
+// if 'obyte-messenger' is present, messages incoming through the encypted chat layers will be treated (not possible in High availability mode)
 
-exports.isHttpServer = false;
 exports.httpDefaultPort = 6800;
 
 console.log('finished AA-channel-lib conf');

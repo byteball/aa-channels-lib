@@ -20,7 +20,7 @@ if (!conf.isHighAvaibilityNode) {
 	var signedMessage = require('./modules/signed_message.js'); // light version that doesn't require DAG DB
 }
 
-if (conf.enabledComLayers.includes('obyte-messenger') && conf.isHighAvaibilityNode)
+if (conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvaibilityNode)
 	throw Error("Cannot use obyte-messenger layer as high avaibility node");
 
 
@@ -55,8 +55,8 @@ async function init(){
 	else
 		throw Error("my_address is not defined in app DB, perhaps the cause is that you've never started the watcher node");
 
-	if (conf.enabledComLayers.includes('obyte-messenger')){
-		console.log("com layer obyte-messenger enabled");
+	if (conf.enabledReceivers.includes('obyte-messenger')){
+		console.log("obyte-messenger receiver enabled");
 		eventBus.on('object', function(from_address, receivedObject){
 			receivedObject.from_address = from_address;
 			if (assocResponseByTag[receivedObject.tag]){
@@ -72,8 +72,8 @@ async function init(){
 		});
 	}
 
-	if (conf.enabledComLayers.includes('http') && conf.isHttpServer){
-		console.log("com layer http enabled");
+	if (conf.enabledReceivers.includes('http') && conf.httpDefaultPort){
+		console.log("http receiver enabled");
 
 		const express = require('express')
 		const app = express()
@@ -156,7 +156,7 @@ function treatPaymentFromPeer(objRequest, handle){
 
 		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=? WHERE aa_address=?", [amount, JSON.stringify(objSignedPackage), objSignedMessage.channel]);
 		if (paymentReceivedCallback){
-				paymentReceivedCallback(amount, objRequest.params.message,channel.peer_address, function(error, response){
+				paymentReceivedCallback(amount, objRequest.params.message,channel.aa_address, function(error, response){
 					if (error)
 						return handle({error: error});
 					else
@@ -283,7 +283,7 @@ function deposit(aa_address, amount, handle){
 			ifOk: function(objJoint){
 				network.broadcastJoint(objJoint);
 				unlock();
-				handle(null);
+				handle(null, objJoint.unit.unit);
 			}
 		})
 		composer.composeJoint({
@@ -296,15 +296,15 @@ function deposit(aa_address, amount, handle){
 }
 
 
-function createNewChannel(peer, initial_amount, callbacks){
+function createNewChannel(peer, initial_amount, handle){
 	if (conf.isHighAvaibilityNode)
-		return callbacks.ifError("high availability node cannot create channel");
+		return handle("high availability node cannot create channel");
 	if (!my_address)
-		return callbacks.ifError("not initialized");
+		return handle("not initialized");
 	if (!validationUtils.isPositiveInteger(initial_amount))
-		return callbacks.ifError("amount must be positive integer");
+		return handle("amount must be positive integer");
 	if (initial_amount < 1e5)
-		return callbacks.ifError("initial_amount must be >= 1e5");
+		return handle("initial_amount must be >= 1e5");
 	const salt =  crypto.randomBytes(30).toString('hex');
 	let matches = peer.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
 
@@ -318,19 +318,21 @@ function createNewChannel(peer, initial_amount, callbacks){
 	const responseCb = function(responseFromPeer){
 		treatResponseToChannelCreation(responseFromPeer, function(error, response){
 			if (error)
-				return callbacks.ifError(error);
-			return callbacks.ifOK(response);
+				return handle(error);
+			return handle(null,response);
 		});
 	}
 
 	if (matches){ //it's a pairing address
+		if (conf.isHighAvaibilityNode)
+			return handle("pairing address cannot be used in high availability mode");
 		var correspondent_address;
 		var peer_url;
 		correspondents.findCorrespondentByPairingCode(peer, (correspondent) => {
 			if (!correspondent) {
 				correspondents.addCorrespondent(peer, 'Payment channel peer', (err, device_address) => {
 					if (err)
-						return callbacks.ifError(err);
+						return handle(err);
 					correspondent_address = device_address;
 					sendRequestToPeer("obyte-messenger", correspondent_address, objToBeSent, responseCb)
 				});
@@ -343,7 +345,7 @@ function createNewChannel(peer, initial_amount, callbacks){
 		peer_url = peer.substr(-1) == "/" ? peer : peer + "/";
 		sendRequestToPeer("http", peer, objToBeSent, responseCb)
 	} else {
-		return callbacks.ifError("not url nor pairing address provided");
+		return handle("not url nor pairing address provided");
 	}
 
 	async function treatResponseToChannelCreation(responseFromPeer, handle){
@@ -366,8 +368,8 @@ function createNewChannel(peer, initial_amount, callbacks){
 		if (result.affectedRows !== 1)
 			return handle("this salt already exists");
 		else{
-			sendDefinitionAndDepositToChannel(response.aa_address,objCalculatedAAParameters.arrDefinition, initial_amount).then(()=>{
-				return handle(null, response.aa_address);
+			sendDefinitionAndDepositToChannel(response.aa_address,objCalculatedAAParameters.arrDefinition, initial_amount).then((unit)=>{
+				return handle(null, response.aa_address, unit);
 			},(error)=>{
 				return handle(error);
 			});
@@ -427,6 +429,8 @@ function sendMessageAndPay(aa_address, message, amount,handle){
 		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [amount, aa_address]);
 
 		if (channel.peer_device_address){
+			if (conf.isHighAvaibilityNode)
+				return unlockAndHandle("device address cannot be used in high availability mode");
 			sendRequestToPeer("obyte-messenger", channel.peer_device_address, objToBeSent, responseCb, timeOutCb);
 		} else if (channel.peer_url){
 			sendRequestToPeer("http", channel.peer_url, objToBeSent, responseCb, timeOutCb);
@@ -452,6 +456,8 @@ function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, time
 	assocResponseByTag[tag] = responseCb;
 	objToBeSent.tag = tag;
 	if (comLayer == "obyte-messenger"){
+		if (conf.isHighAvaibilityNode)
+			throw Error("obyte messenger no available in high avaibility mode");
 		const device = require('ocore/device.js');
 		device.sendMessageToDevice(peer_address, 'object', objToBeSent);
 	} else if (comLayer == "http"){
@@ -497,7 +503,7 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 			},
 			ifOk: function(objJoint){
 				network.broadcastJoint(objJoint);
-				resolve();
+				resolve(objJoint.unit.unit);
 			}
 		})
 

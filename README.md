@@ -12,32 +12,29 @@ The communication between them can be configured either as HTTPS or as the encry
 - HTTPS: a party that wants to receive payment has to setup an Nginx proxy but the communication is direct, very fast and the application can be infinitely scalable (see High Availability node below)
 
 One peer initiates the creation with:
+```javascript
+channels.createNewChannel(peer, initial_amount,  function(error, aa_address, unit){
+
+});
 ```
-channels.createNewChannel(url or pairing address, initial deposit, {
-		ifOK: function(aa_address){
-			//aa_address is the address of the created channel
-		},
-		ifError: function(error){
-		}
-	}
-```
-An url or a pairing address is provided depending of the chosen communication layer, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. The AA address is then returned by the function and is to be saved as it will used to identify channel for further operation.
+
+**peer** is an url or a pairing address where the peer can be reached, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. **aa_address** is then returned by the function and is to be saved as it will used to identify channel for further operation.
 Once the payment channel is opened and confirmed by Obyte network, transactions can begin.
 
 One peer wanting to send an offchain payment uses this function:
 
-```
-channels.sendMessageAndPay(aa_address, "I want to pay for something", amount ,function(error, response){
+```javascript
+channels.sendMessageAndPay(aa_address, message_to_peer, amount, function(error, response){
 	if (error)
 		return console.log(error);
 	else
 		return console.log(response);
 });
 ```
-The first parameter is the address of the channel provided during its creation, the second parameter is anything that can be parsed in JSON (string, number or object) and that you want to transmit to your peer, the third parameter is the amount of your payment and the fourth parameter is a callback that will be returned with an error if your payment couldn't have been sent or wasn't accepted or the response from your peer.
+**aa_address** is the address of the channel provided during its creation, **message_to_peer** is anything that can be parsed in JSON (string, number or object) and that you want to transmit to your peer, **amount** is the amount of your payment and **function** is a callback that will be returned with **error** or **response** from your peer.
 
 You can set a function to be executed when you receive an offchain payment:
-```
+```javascript
 	channels.setCallBackForPaymentReceived(function(amount, message, peer_address, handle){
 		if (message == "thanks me")
 			return handle("Thank you " + peer_address + " I received you payment of " + amount + " bytes");
@@ -50,16 +47,16 @@ The response can be a number, a string or an object, and will be forwarded to th
 
 
 The channel can be closed an anytime by one of the party with:
-```
+```javascript
 channels.close(aa_address, function(error){
 	if (error)
 		console.error(error);
 });
 ```
-After a confirmation by the network and a maximum timeout of 5 minutes, you headless wallet will receive a payment calculated as below:
-amount received = total amount deposited by you to the channel - total amount paid to your peer + total payment received from your peer
+After a confirmation by the network and a maximum timeout of 5 minutes, you headless wallet will receive a payment calculated as follow:
+**amount received** = **total amount deposited by you to the channel** - **total amount paid to your peer** + **total payment received from your peer**
 
-All functions and events available are documented there: link-to-doc
+All functions and events available are documented there: https://github.com/Papabyte/aa-channels-lib/blob/master/doc/reference.md
 
 ## High Avaibility mode
 A node only destinated to receive payment can run in high-availability mode. In this case, the front service that handle the requests from clients is separated from a background service that runs the headless wallet. Several front services can run in parallel to serve clients even when the background goes down for some time (like for being updated). That greatly helps the scalability of your business.

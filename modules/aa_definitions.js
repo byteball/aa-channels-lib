@@ -15,11 +15,10 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 			$bFromParties = ($bFromA OR $bFromB);
 			if ($bFromParties)
 				$party = $bFromA ? 'A' : 'B';
-				
 		}`,
 		messages: {
 			cases: [
-				{ // refill the AA
+				{ // one party fills or refills the AA
 					if: `{ $bFromParties AND trigger.output[[asset=base]] >= 1e5 }`,
 					init: `{
 						if (var['close_initiated_by']){
@@ -32,7 +31,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 						}
 					}`,
 					messages: [{
-						if:"{!$refused}",
+						if:"{!$refused}", //we broadcast an unit indicating the new state of AA if deposit is accepted
 						app: 'data',
 						payload: {
 							open: 1,
@@ -44,7 +43,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 						}
 					},
 					{
-						if:"{$refused}",
+						if:"{$refused}", //we add data to inform that deposit is refused
 						app: 'data',
 						payload: {
 							refused: 1,
@@ -53,7 +52,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 						}
 					},
 					{
-						if:"{$refused}",
+						if:"{$refused}", //we refund sender if deposit is refused
 						app: 'payment',
 						payload: {
 							asset: "base",
@@ -104,7 +103,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 					}`,
 					messages: [
 							{
-								app: 'data',
+								app: 'data', //we broadcast an unit indicating the channel has received a closing request
 								payload: {
 									closing: 1,
 									period: "{var['period']}",
@@ -160,7 +159,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 							}
 						},
 						{
-							app: 'data',
+							app: 'data',  //we add data to indicate the channel is effectively closed
 							payload: {
 								closed: 1,
 								period: "{var['period']}",
@@ -211,7 +210,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 							}
 						},
 						{
-							app: 'data',
+							app: 'data',  //we add data to indicate the channel has been closed with a fraud proof submitted
 							payload: {
 								closed: 1,
 								fraud_proof: 1,
