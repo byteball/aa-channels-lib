@@ -17,7 +17,7 @@ Add a conf.js in the root directory of your project modified according to your d
 exports.bLight = true; // change to false to run as full node
 exports.bSingleAddress = true; //should always be true
 
-exports.WS_PROTOCOL = "ws://";
+exports.WS_PROTOCOL = "wss://";
 exports.hub = process.env.testnet ? 'obyte.org/bb-test' : 'obyte.org/bb';
 exports.deviceName = 'AA-channel-application';
 exports.permanent_pairing_secret = '0000';
@@ -45,7 +45,7 @@ channels.createNewChannel(peer, initial_amount,  function(error, aa_address, uni
 - **initial_amount**: initial amount in bytes you want to deposit to channel.
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
-- unit: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
+- **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
 The channel can be used only after some confirmation time for your deposit, listen event `my_deposit_became_stable` and watch for given `unit` to know when sending payment to channel is possible.
 
 #### sendMessageAndPay

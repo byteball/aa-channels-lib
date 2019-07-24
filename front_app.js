@@ -11,6 +11,7 @@ const correspondents = require('./modules/correspondents.js');
 const request = require('request');
 const async = require('async');
 
+const REQUEST_TIMEOUT = 8*1000;
 
 if (!conf.isHighAvaibilityNode) {
 	require('./aa_watcher.js');
@@ -80,7 +81,6 @@ async function init(){
 
 		app.use(require('body-parser').json());
 		app.post('/post', function(request, response){
-			console.error(JSON.stringify(request.body));
 			if (typeof request != 'object' || typeof request.body != 'object')
 				return response.send({error: "bad request"});
 			else 
@@ -98,6 +98,9 @@ async function init(){
 // treat requests received either by messenger or POST http
 function treatIncomingRequest(objRequest, handle){
 	console.log("treatIncomingRequest " + JSON.stringify(objRequest));
+
+	if (objRequest.timestamp < (Date.now() - REQUEST_TIMEOUT/2))
+		return handle({error:"Timestamp too old, check system time"});
 	if (objRequest.command == 'create_channel'){
 		if (typeof objRequest.params != "object")
 			return handle({error:"No params"});
@@ -134,6 +137,10 @@ function treatPaymentFromPeer(objRequest, handle){
 		if (typeof objSignedMessage != 'object')
 			return handle({error:"signed message should be an object"});
 
+		if (!validationUtils.isValidAddress(objSignedMessage.channel))
+			return handle({error:"aa address is not valid"});
+
+		mutex.lock
 		const channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
 		if (channels.length === 0)
 			return handle({error:"aa address not found"});
@@ -149,14 +156,24 @@ function treatPaymentFromPeer(objRequest, handle){
 		if (!validationUtils.isPositiveInteger(objSignedMessage.amount_spent))
 			return handle({error:"amount_spent should be a positive integer"});
 
-		
-		const amount = objSignedMessage.amount_spent - channel.amount_spent_by_peer;
-		if (amount > channel.amount_deposited_by_peer)
+		if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
+			return handle({error:"payment_amount should be a positive integer"});
+
+		const payment_amount = objSignedMessage.payment_amount;
+
+		if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
 			return handle({error:"AA not funded enough"});
 
-		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=? WHERE aa_address=?", [amount, JSON.stringify(objSignedPackage), objSignedMessage.channel]);
+		const delta_amount_spent = (objSignedMessage.amount_spent - channel.amount_spent_by_peer) > 0 ? (objSignedMessage.amount_spent - channel.amount_spent_by_peer) : 0;
+		const peer_credit =  delta_amount_spent + channel.credit_attributed_to_peer;
+		
+		if (payment_amount > peer_credit)
+			return handle({error:"Payment amount is over your available credit"});
+
+		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,credit_attributed_to_peer=?\n\
+		WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), objSignedMessage.channel], peer_credit -payment_amount);
 		if (paymentReceivedCallback){
-				paymentReceivedCallback(amount, objRequest.params.message,channel.aa_address, function(error, response){
+				paymentReceivedCallback(payment_amount, objRequest.params.message,channel.aa_address, function(error, response){
 					if (error)
 						return handle({error: error});
 					else
@@ -377,7 +394,7 @@ function createNewChannel(peer, initial_amount, handle){
 	}
 }
 
-function sendMessageAndPay(aa_address, message, amount,handle){
+function sendMessageAndPay(aa_address, message, payment_amount,handle){
 	if (conf.isHighAvaibilityNode)
 		return handle("high availability node can only receive payment");
 	if (!my_address)
@@ -400,13 +417,14 @@ function sendMessageAndPay(aa_address, message, amount,handle){
 
 		const myFreeAmountOnAA = channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
 
-		if (amount > myFreeAmountOnAA)
+		if (payment_amount > myFreeAmountOnAA)
 			return unlockAndHandle("AA not funded enough");
 
-		const objSignedPackage = await signMessage({amount_spent: (amount + channel.amount_spent_by_me), period: channel.period, channel: aa_address}, my_address);
+		const objSignedPackage = await signMessage({payment_amount: payment_amount, amount_spent: (amount + channel.amount_spent_by_me), period: channel.period, channel: aa_address}, my_address);
 
 		const objToBeSent = {
-			command:"pay", 
+			command:"pay",
+			timestamp: Date.now(),
 			params:{
 				signed_package : objSignedPackage,
 				message: message
@@ -479,7 +497,7 @@ function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, time
 				timeOutCb();
 				delete assocResponseByTag[tag];
 			}
-		}, 5000);
+		}, REQUEST_TIMEOUT);
 }
 
 

@@ -13,6 +13,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	version INTEGER,\n\
 	salt CHAR(60) UNIQUE NOT NULL,\n\
 	definition TEXT,\n\
+	asset CHAR(44) DEFAULT NULL,\n\
 	peer_address CHAR(32) NOT NULL, \n\
 	peer_device_address CHAR(33) DEFAULT NULL, \n\
 	peer_url VARCHAR(100) DEFAULT NULL,\n\
@@ -20,6 +21,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
+	credit_attributed_to_peer INTEGER DEFAULT 0,\n\
 	auto_refill_threshold INTEGER DEFAULT 0,\n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\
 	close_timestamp INTEGER,\n\

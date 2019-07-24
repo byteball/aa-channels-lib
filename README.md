@@ -59,7 +59,7 @@ After a confirmation by the network and a maximum timeout of 5 minutes, you head
 All functions and events available are documented there: https://github.com/Papabyte/aa-channels-lib/blob/master/doc/reference.md
 
 ## High Avaibility mode
-A node only destinated to receive payment can run in high-availability mode. In this case, the front service that handle the requests from clients is separated from a background service that runs the headless wallet. Several front services can run in parallel to serve clients even when the background goes down for some time (like for being updated). That greatly helps the scalability of your business.
+A node only destinated to receive payment can run in high-availability mode. In this case, the front service that handles the requests from clients is separated from a background service that runs the headless wallet. Several front services can run in parallel to serve clients even when the background goes down for some time (like for being updated). That greatly helps the scalability of your business.
 
 The exact setup depends of you need but you will likely use:
 - a load balancer that will redirect https requests to different front service instances.

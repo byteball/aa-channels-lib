@@ -25,19 +25,27 @@ eventBus.once('headless_wallet_ready', function(){
 	headlessWallet.readFirstAddress(async function(_my_address){
 		my_address = _my_address;
 		await appDB.query("INSERT "+ dagDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
-		treatNewStableUnits(); // we look for units that weren't treated in case node was interrupted at bad time
-		lookForAndProcessTasks();
+		treatUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
 		setInterval(lookForAndProcessTasks, 5000);
 	});
 });
 
-eventBus.on('my_transactions_became_stable', function(arrUnits){
-	treatNewStableUnits(arrUnits);
-});
+if (conf.bLight){
+	eventBus.on('my_transactions_became_stable', function(arrUnits){
+		treatUnitsFromAA(arrUnits);
+	});
+} else {
+	eventBus.on('new_aa_unit', async function(objUnit){
+		const channels = await appDB.query("SELECT 1 FROM channels WHERE aa_address=?",[objUnit.authors[0].address]);
+		if (channels[0])
+				treatUnitsFromAA([objUnit.unit]);
+	});
+}
 
 
 function lookForAndProcessTasks(){
-	updateAddressesToWatch();
+	if (conf.bLight)
+		updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
 	if (conf.isHighAvaibilityNode)
 		treatClosingRequests();
@@ -56,28 +64,29 @@ async function updateAddressesToWatch(){
 async function getSqlFilterForNewUnitsFromChannels(){
 	return new Promise(async (resolve, reject) => {
 		const rows = await appDB.query("SELECT peer_address,last_updated_mci,aa_address FROM channels");
-		var string = rows.length > 0 ? " (" : " 0 AND ";
+		var string = rows.length > 0 ? " (" : " 0 ";
 		var i = 0;
 		rows.forEach(function(row){
 			i++;
 		//	string += "((outputs.address='"+row.aa_address + "' OR author_address='" + row.aa_address + "') " + " AND main_chain_index>"  + row.last_updated_mci +") ";
-		string += "(author_address='" + row.aa_address  + "' AND main_chain_index>"  + row.last_updated_mci +") ";
+		string += "(author_address='" + row.aa_address  +"' " + (conf.bLight ? (" AND main_chain_index>"  + row.last_updated_mci): "") +") ";
 		string += rows.length > i ? " OR " : "";
 		});
-		string += rows.length > 0 ? ") AND " : "";
+		string += rows.length > 0 ? ") " : "";
 		resolve(string);
 	});
 }
 
 
 
-function treatNewStableUnits(arrUnits){	
-	mutex.lock(['treatNewStableUnits'], async (unlock)=>{
-	var unitFilter = arrUnits ? " units.unit IN("+arrUnits.map(dagDB.escape).join(',')+") AND " : ""; 
-	const new_units = await dagDB.query("SELECT timestamp,units.unit,outputs.amount,main_chain_index,unit_authors.address AS author_address FROM units \n\
-		CROSS JOIN outputs USING(unit)\n\
+function treatUnitsFromAA(arrUnits){	
+	mutex.lock(['treatUnitsFromAA'], async (unlock)=>{
+	const unitFilter = arrUnits ? " units.unit IN("+arrUnits.map(dagDB.escape).join(',')+") AND " : "";
+	const isStableFilter = conf.bLight ? " AND is_stable=1 AND sequence='good' " : "";
+	
+	const new_units = await dagDB.query("SELECT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
 		CROSS JOIN unit_authors USING(unit)\n\
-		WHERE "+unitFilter+ await getSqlFilterForNewUnitsFromChannels() + " outputs.asset IS NULL AND is_stable=1 AND sequence='good' GROUP BY units.unit ORDER BY main_chain_index ASC");
+		WHERE "+unitFilter+ await getSqlFilterForNewUnitsFromChannels() + isStableFilter +" GROUP BY units.unit ORDER BY main_chain_index,level ASC");
 		if (new_units.length === 0){
 			unlock();
 			return console.log("nothing concerns payment channel in these units");

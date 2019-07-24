@@ -73,7 +73,6 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 									var['period'] = 1;
 									$key = 'balance' || $party;
 									var[$key] += trigger.output[[asset=base]];
-									response[$key] = var[$key];
 								}
 							}`
 						}
@@ -124,9 +123,6 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 									bounce('one of the balances would become negative');
 								var['close_initiated_by'] = $party;
 								var['close_start_ts'] = timestamp;
-								response['close_start_ts'] = timestamp;
-								response['finalBalanceA'] = $finalBalanceA;
-								response['finalBalanceB'] = $finalBalanceB;
 								if (!var['event_id'])
 									var['event_id'] = 2;
 								else
