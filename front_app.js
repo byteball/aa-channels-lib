@@ -171,7 +171,7 @@ function treatPaymentFromPeer(objRequest, handle){
 			return handle({error:"Payment amount is over your available credit"});
 
 		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,credit_attributed_to_peer=?\n\
-		WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), objSignedMessage.channel], peer_credit -payment_amount);
+		WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount,channel.aa_address]);
 		if (paymentReceivedCallback){
 				paymentReceivedCallback(payment_amount, objRequest.params.message,channel.aa_address, function(error, response){
 					if (error)
@@ -180,7 +180,7 @@ function treatPaymentFromPeer(objRequest, handle){
 						return handle({response: response});
 				});
 			} else {
-				return handle({response:"received payment for " + amount });
+				return handle({response:"received payment for " + payment_amount });
 			}
 	});
 }
@@ -188,7 +188,6 @@ function treatPaymentFromPeer(objRequest, handle){
 
 
 function createNewChannelOnPeerRequest(objRequest, handle){
-	console.error(JSON.stringify(objRequest));
 	const objAAParameters= aaDefinitions.getAddressAndParametersForAA(my_address, objRequest.params.address, objRequest.params.salt);
 	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (aa_address,version,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?)",
 	[objAAParameters.aa_address, objAAParameters.version, objRequest.params.salt, objRequest.params.address, objRequest.from_address, objRequest.url], function(result){
@@ -420,7 +419,7 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		if (payment_amount > myFreeAmountOnAA)
 			return unlockAndHandle("AA not funded enough");
 
-		const objSignedPackage = await signMessage({payment_amount: payment_amount, amount_spent: (amount + channel.amount_spent_by_me), period: channel.period, channel: aa_address}, my_address);
+		const objSignedPackage = await signMessage({payment_amount: payment_amount, amount_spent: (payment_amount + channel.amount_spent_by_me), period: channel.period, channel: aa_address}, my_address);
 
 		const objToBeSent = {
 			command:"pay",
@@ -432,7 +431,7 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		}
 		const responseCb = async function(responseFromPeer){
 			if (responseFromPeer.error){
-				await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me-? WHERE aa_address=?", [amount, aa_address]); // if peer returned an error, we cancel the increment
+				await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me-? WHERE aa_address=?", [payment_amount, aa_address]); // if peer returned an error, we cancel the increment
 				return unlockAndHandle(responseFromPeer.error);
 			}
 			if (!responseFromPeer.response)
@@ -444,7 +443,7 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 			return unlockAndHandle('no response from peer');
 		};
 
-		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [amount, aa_address]);
+		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
 
 		if (channel.peer_device_address){
 			if (conf.isHighAvaibilityNode)
