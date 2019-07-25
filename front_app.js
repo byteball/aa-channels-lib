@@ -96,7 +96,7 @@ async function init(){
 
 
 // treat requests received either by messenger or POST http
-function treatIncomingRequest(objRequest, handle){
+async function treatIncomingRequest(objRequest, handle){
 	console.log("treatIncomingRequest " + JSON.stringify(objRequest));
 
 	if (objRequest.timestamp < (Date.now() - REQUEST_TIMEOUT/2))
@@ -121,6 +121,19 @@ function treatIncomingRequest(objRequest, handle){
 		return treatPaymentFromPeer(objRequest, handle);
 	}
 
+	if (objRequest.command == 'is_open'){
+		if (typeof objRequest.params != "object")
+			return handle({error:"No params"});
+		if (!validationUtils.isValidAddress(objRequest.params.aa_address))
+			return handle({error:"Invalid aa address"});
+		const channels = await appDB.query("SELECT status FROM channels WHERE aa_address=?", [objRequest.params.aa_address]);
+		if (channels.length === 0)
+			return handle({error:"aa address not known"});
+		if (channels[0].status == "open" || channels[0].status == "open_confirmed_by_peer")
+			return handle({response: true});
+		else
+			return handle({response: false});
+		}
 }
 
 
@@ -152,8 +165,11 @@ function treatPaymentFromPeer(objRequest, handle){
 		
 			const channel = channels[0];
 
+			if (channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
+				return unlockAndHandle({error:"closing initiated by peer", error_code:"closing_initiated_by_peer"});
+
 			if (channel.status != 'open')
-				return unlockAndHandle({error:"channel not open for peer"});
+				return unlockAndHandle({error:"channel not open for peer", error_code:"not_open_for_peer"});
 
 			if (channel.period != objSignedMessage.period)
 				return unlockAndHandle({error:"wrong period"});
@@ -283,7 +299,7 @@ function deposit(aa_address, amount, handle){
 			return handle ("unknown channel");
 		}
 
-		if (channels[0].status != "open" && channels[0].status != "closed" && channels[0].status != "created"){
+		if (channels[0].status != "open" && channels[0].status != "open_confirmed_by_peer" && channels[0].status != "closed" && channels[0].status != "created"){
 			unlock();
 			return handle("channel status: "+  channels[0].status+ ", no deposit possible");
 		}
@@ -400,6 +416,26 @@ function createNewChannel(peer, initial_amount, handle){
 	}
 }
 
+ function askIfChannelOpen(comLayer, peer, aa_address){
+	return new Promise((resolve, reject) => {
+		const objToBeSent = {
+			command:"is_open",
+			timestamp: Date.now(),
+			params:{
+				aa_address : aa_address
+			}
+		}
+		const responseCb = async function(responseFromPeer){
+			return resolve(responseFromPeer.response);
+		}
+
+		const timeOutCb =  function(){
+			return resolve(false);
+		};
+		sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb);
+	});
+}
+
 function sendMessageAndPay(aa_address, message, payment_amount,handle){
 	if (conf.isHighAvaibilityNode)
 		return handle("high availability node can only receive payment");
@@ -413,12 +449,16 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		}
 		const channels = await appDB.query("SELECT status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,amount_spent_by_me FROM channels WHERE aa_address=?",[aa_address]);
 
+
 		if (channels.length === 0)
 			return unlockAndHandle("AA address not found");
 
 		const channel = channels[0];
-	
-		if (channel.status != "open")
+
+		if (channel.peer_device_address && conf.isHighAvaibilityNode)
+			return unlockAndHandle("device address cannot be used in high availability mode");
+
+		if (channel.status != "open" && channel.status != "open_confirmed_by_peer")
 			return unlockAndHandle("Channel is not open");
 
 		const myFreeAmountOnAA = channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
@@ -426,6 +466,16 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		if (payment_amount > myFreeAmountOnAA)
 			return unlockAndHandle("AA not funded enough");
 
+		const comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
+		const peer = channel.peer_device_address || channel.peer_url;
+
+		if (channel.status != "open_confirmed_by_peer"){
+			if (await askIfChannelOpen(comLayer, peer , aa_address))
+				await appDB.query("UPDATE channels SET status='open_confirmed_by_peer' WHERE aa_address=?", [aa_address]);
+			else
+				return unlockAndHandle("Channel is not open for peer");
+		}
+			
 		const objSignedPackage = await signMessage({payment_amount: payment_amount, amount_spent: (payment_amount + channel.amount_spent_by_me), period: channel.period, channel: aa_address}, my_address);
 
 		const objToBeSent = {
@@ -439,6 +489,8 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		const responseCb = async function(responseFromPeer){
 			if (responseFromPeer.error){
 				await appDB.query("UPDATE channels SET amount_possibly_lost_by_me=amount_possibly_lost_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
+				if (responseFromPeer.error_code == "closing_initiated_by_peer")
+					await appDB.query("UPDATE channels SET status='closing_initiated_by_peer' WHERE aa_address=?", [aa_address]);
 				return unlockAndHandle(responseFromPeer.error);
 			}
 			if (!responseFromPeer.response)
@@ -451,16 +503,8 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		};
 
 		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
-
-		if (channel.peer_device_address){
-			if (conf.isHighAvaibilityNode)
-				return unlockAndHandle("device address cannot be used in high availability mode");
-			sendRequestToPeer("obyte-messenger", channel.peer_device_address, objToBeSent, responseCb, timeOutCb);
-		} else if (channel.peer_url){
-			sendRequestToPeer("http", channel.peer_url, objToBeSent, responseCb, timeOutCb);
-		} else {
-			return unlockAndHandle("no layer com available for this peer");
-		}
+		sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb);
+	
 	});
 }
 
