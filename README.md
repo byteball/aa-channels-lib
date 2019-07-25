@@ -13,7 +13,7 @@ The communication between them can be configured either as HTTPS or as the encry
 
 One peer initiates the creation with:
 ```javascript
-channels.createNewChannel(peer, initial_amount,  function(error, aa_address, unit){
+channels.createNewChannel(peer, initial_amount, options, function(error, aa_address, unit){
 
 });
 ```
@@ -37,9 +37,9 @@ You can set a function to be executed when you receive an offchain payment:
 ```javascript
 	channels.setCallBackForPaymentReceived(function(amount, message, peer_address, handle){
 		if (message == "thanks me")
-			return handle("Thank you " + peer_address + " I received you payment of " + amount + " bytes");
-		else
-			return handle("payment received");
+			return handle(null, "Thank you " + peer_address + " I received you payment of " + amount + " bytes");
+		else if (message == "send me an error")
+			return handle("this is an error");
 	});
 
 ```

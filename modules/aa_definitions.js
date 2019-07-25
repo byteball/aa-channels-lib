@@ -2,11 +2,11 @@ const objectHash = require('ocore/object_hash.js');
 const conf = require('ocore/conf.js');
 
 
-function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.aa_version){
+function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 
 	const arrDefinition = ['autonomous agent', {
 		init: `{
-			$close_timeout = 300;
+			$close_timeout = '${timeout}';
 			$salt = '${salt}';
 			$addressA = '${addressA}';
 			$addressB = '${addressB}';
@@ -243,7 +243,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 	}];
 
 	const aa_address = objectHash.getChash160(arrDefinition);
-	return {aa_address: aa_address, address_a: addressA, address_b: addressB,  version: version, salt: salt, arrDefinition: arrDefinition};
+	return {aa_address: aa_address, address_a: addressA, address_b: addressB,  timeout: timeout, salt: salt, arrDefinition: arrDefinition};
 }
 
 exports.getAddressAndParametersForAA = getAddressAndParametersForAA;

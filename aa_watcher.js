@@ -275,7 +275,7 @@ function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_pro
 
 async function confirmClosingIfTimeoutReached(){
 	const current_ts = Math.round(Date.now() / 1000);
-	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me_acknowledged' AND close_timestamp <?", [current_ts - 300]);
+	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me_acknowledged' AND close_timestamp < (? - timeout)", [current_ts]);
 	rows.forEach(function(row){
 		confirmClosing(row.aa_address, row.period);
 	});

@@ -23,6 +23,9 @@ exports.deviceName = 'AA-channel-application';
 exports.permanent_pairing_secret = '0000';
 exports.control_addresses = [''];
 
+exports.minChannelTimeoutInSecond = 600;  // timeout value under which channel creation request will be refused
+exports.maxChannelTimeoutInSecond = 1000; // timeout value above which channel creation request will be refused
+exports.defaultTimeoutInSecond = 600;. // default timeout value for channels created by me
 
 exports.isHighAvaibilityNode =  false;
 
@@ -37,16 +40,29 @@ exports.httpDefaultPort = 6800;
 
 #### createNewChannel
 ```javascript
-channels.createNewChannel(peer, initial_amount,  function(error, aa_address, unit){
+channels.createNewChannel(peer, initial_amount, options, function(error, aa_address, unit){
 
 });
 ```
 - **peer**: peering address or http address of your peer.
 - **initial_amount**: initial amount in bytes you want to deposit to channel.
+- **options** object with the follwing attributes:
+  * timeout (optionnal): timeout in seconds for the channel
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
 - **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
 The channel can be used only after some confirmation time for your deposit, listen event `my_deposit_became_stable` and watch for given `unit` to know when sending payment to channel is possible.
+
+#### setAutoRefill
+```javascript
+channels.setAutoRefill(aa_address, refill_amount, refill_threshold, function(error){
+
+});
+```
+- **aa_address**: address of the channel obtained through `createNewChannel` function or `channel_created_by_peer` event.
+- **refill_amount**: amount that is automatically refilled if available amount on channel goes below a threshold.
+- **refill_threshold**: amount available amount under which the channel will be automatically refilled.
+- **error**: error returned if setting failed.
 
 #### sendMessageAndPay
 ```javascript
@@ -60,17 +76,18 @@ channels.sendMessageAndPay(aa_address, message_to_peer, amount, function(error, 
 - **aa_address**: address of the channel obtained through `createNewChannel` function or `channel_created_by_peer` event.
 - **message_to_peer**: string, object or number sent to peer alongside with the payment. It's likely be used to indicate what the payment is destinated to.
 - **amount**: amount in byte you want to pay.
-- **error**: if the payment is not successful, this string will indicate the reason.
+- **error**: error returned by peer or if payment couldn't have been sent
 
 #### setCallBackForPaymentReceived
 ```javascript
 channels.setCallBackForPaymentReceived(function(amount, message_from_peer, aa_address, handle){
-		return handle(response);
+		return handle(error, response);
 });
 ```
 - **amount**: amount received in bytes
 - **message_to_peer**: string, object or number received from peer alongside with the payment.
 - **aa_address**: address of the channel that received payment
+- **error**: will be returned to peer if not null
 - **response**: your response to the peer, will be transmitted back through http response or obyte message.
 
 #### deposit

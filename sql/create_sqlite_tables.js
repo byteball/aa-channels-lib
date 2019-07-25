@@ -10,7 +10,7 @@ const db = require('ocore/db.js');
 
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	aa_address CHAR(32) PRIMARY KEY, \n\
-	version INTEGER,\n\
+	version INTEGER DEFAULT 0,\n\
 	salt CHAR(60) UNIQUE NOT NULL,\n\
 	definition TEXT,\n\
 	asset CHAR(44) DEFAULT NULL,\n\
@@ -26,6 +26,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	auto_refill_threshold INTEGER DEFAULT 0,\n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\
 	close_timestamp INTEGER,\n\
+	timeout INTEGER NOT NULL,\n\
 	period INTEGER DEFAULT 1,\n\
 	last_message_from_peer TEXT,\n\
 	last_event_id INTEGER DEFAULT 0,\n\
