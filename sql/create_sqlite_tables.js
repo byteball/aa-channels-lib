@@ -21,6 +21,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
+	amount_possibly_lost_by_me INTEGER DEFAULT 0,\n\
 	credit_attributed_to_peer INTEGER DEFAULT 0,\n\
 	auto_refill_threshold INTEGER DEFAULT 0,\n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\

@@ -138,8 +138,13 @@ function getAddressAndParametersForAA(addressA, addressB, salt, version = conf.a
 							bounce('too early');
 						if (trigger.data.period != var['period'])
 							bounce('wrong period');
-						$finalBalanceA = var['balanceA'] - var['spentByA'] + var['spentByB'];
-						$finalBalanceB = var['balanceB'] - var['spentByB'] + var['spentByA'];
+						$additionnalTransferredFromMe = trigger.data.additionnalTransferredFromMe otherwise 0;
+						$additionalSpentByA = $party == 'A' ? $additionnalTransferredFromMe : 0;
+						$additionalSpentByB = $party == 'B' ? $additionnalTransferredFromMe : 0;
+						$finalBalanceA = var['balanceA'] - var['spentByA'] + var['spentByB'] + $additionalSpentByB - $additionalSpentByA;
+						$finalBalanceB = var['balanceB'] - var['spentByB'] + var['spentByA'] + $additionalSpentByA - $additionalSpentByB;
+						if ($finalBalanceA < 0 OR $finalBalanceB < 0)
+							bounce('one of the balances would become negative');
 					}`,
 					messages: [
 						{

@@ -140,48 +140,54 @@ function treatPaymentFromPeer(objRequest, handle){
 		if (!validationUtils.isValidAddress(objSignedMessage.channel))
 			return handle({error:"aa address is not valid"});
 
-		mutex.lock
-		const channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
-		if (channels.length === 0)
-			return handle({error:"aa address not found"});
-	
-		const channel = channels[0];
-
-		if (channel.status != 'open')
-			return handle({error:"channel not open for peer"});
-
-		if (channel.period != objSignedMessage.period)
-			return handle({error:"wrong period"});
-
-		if (!validationUtils.isPositiveInteger(objSignedMessage.amount_spent))
-			return handle({error:"amount_spent should be a positive integer"});
-
-		if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
-			return handle({error:"payment_amount should be a positive integer"});
-
-		const payment_amount = objSignedMessage.payment_amount;
-
-		if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
-			return handle({error:"AA not funded enough"});
-
-		const delta_amount_spent = (objSignedMessage.amount_spent - channel.amount_spent_by_peer) > 0 ? (objSignedMessage.amount_spent - channel.amount_spent_by_peer) : 0;
-		const peer_credit =  delta_amount_spent + channel.credit_attributed_to_peer;
-		
-		if (payment_amount > peer_credit)
-			return handle({error:"Payment amount is over your available credit"});
-
-		await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,credit_attributed_to_peer=?\n\
-		WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount,channel.aa_address]);
-		if (paymentReceivedCallback){
-				paymentReceivedCallback(payment_amount, objRequest.params.message,channel.aa_address, function(error, response){
-					if (error)
-						return handle({error: error});
-					else
-						return handle({response: response});
-				});
-			} else {
-				return handle({response:"received payment for " + payment_amount });
+		mutex.lock([objSignedMessage.channel], async function(unlock){
+			function unlockAndHandle(response){
+				unlock();
+				handle(response);
 			}
+
+			const channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
+			if (channels.length === 0)
+				return unlockAndHandle({error:"aa address not found"});
+		
+			const channel = channels[0];
+
+			if (channel.status != 'open')
+				return unlockAndHandle({error:"channel not open for peer"});
+
+			if (channel.period != objSignedMessage.period)
+				return unlockAndHandle({error:"wrong period"});
+
+			if (!validationUtils.isPositiveInteger(objSignedMessage.amount_spent))
+				return unlockAndHandle({error:"amount_spent should be a positive integer"});
+
+			if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
+				return unlockAndHandle({error:"payment_amount should be a positive integer"});
+
+			const payment_amount = objSignedMessage.payment_amount;
+
+			if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
+				return unlockAndHandle({error:"AA not funded enough"});
+
+			const delta_amount_spent = (objSignedMessage.amount_spent - channel.amount_spent_by_peer) > 0 ? (objSignedMessage.amount_spent - channel.amount_spent_by_peer) : 0;
+			const peer_credit =  delta_amount_spent + channel.credit_attributed_to_peer;
+			
+			if (payment_amount > peer_credit)
+				return unlockAndHandle({error:"Payment amount is over your available credit"});
+
+			await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,credit_attributed_to_peer=?\n\
+			WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount,channel.aa_address]);
+			if (paymentReceivedCallback){
+					paymentReceivedCallback(payment_amount, objRequest.params.message,channel.aa_address, function(error, response){
+						if (error)
+							return unlockAndHandle({error: error});
+						else
+							return unlockAndHandle({response: response});
+					});
+				} else {
+					return unlockAndHandle({response:"received payment for " + payment_amount });
+				}
+		});
 	});
 }
 
@@ -209,9 +215,10 @@ function setCallBackForPaymentReceived(_cb){
 
 async function close(aa_address, handle){
 	if (!conf.isHighAvaibilityNode){
-		const results = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE aa_address=?",[aa_address]);
-		if (results.length === 0)
+		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, credit_attributed_to_peer FROM channels WHERE aa_address=?",[aa_address]);
+		if (channels.length === 0)
 			return handle("unknown AA address");
+		const channel = channels[0];
 		const composer = require('ocore/composer.js');
 		const network = require('ocore/network.js');
 		const callbacks = composer.getSavingCallbacks({
@@ -231,11 +238,11 @@ async function close(aa_address, handle){
 			}
 		})
 
-		const payload = { close: 1, period: results[0].period};
-		if (results[0].amount_spent_by_me > 0)
-			payload.transferredFromMe = results[0].amount_spent_by_me;
-		if (results[0].amount_spent_by_peer > 0)
-			payload.sentByPeer = JSON.parse(results[0].last_message_from_peer);
+		const payload = {close: 1, period: channel.period};
+		if (channel.amount_spent_by_me + channel.credit_attributed_to_peer > 0)
+			payload.transferredFromMe = channel.amount_spent_by_me + channel.credit_attributed_to_peer; 
+		if (channel.amount_spent_by_peer > 0)
+			payload.sentByPeer = JSON.parse(channel.last_message_from_peer);
 
 		const objMessage = {
 			app: 'data',
@@ -431,7 +438,7 @@ function sendMessageAndPay(aa_address, message, payment_amount,handle){
 		}
 		const responseCb = async function(responseFromPeer){
 			if (responseFromPeer.error){
-				await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me-? WHERE aa_address=?", [payment_amount, aa_address]); // if peer returned an error, we cancel the increment
+				await appDB.query("UPDATE channels SET amount_possibly_lost_by_me=amount_possibly_lost_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
 				return unlockAndHandle(responseFromPeer.error);
 			}
 			if (!responseFromPeer.response)
