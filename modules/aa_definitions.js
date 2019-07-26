@@ -6,7 +6,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 
 	const arrDefinition = ['autonomous agent', {
 		init: `{
-			$close_timeout = '${timeout}';
+			$close_timeout = ${timeout};
 			$salt = '${salt}';
 			$asset = '${asset}';
 			$addressA = '${addressA}';
@@ -58,7 +58,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 						payload: {
 							asset: "{$asset}",
 							outputs: [
-								{address: "{trigger.address}", amount: "{trigger.output[[asset=$asset]]}"}
+								{address: "{trigger.address}", amount: "{$asset == 'base' ? (trigger.output[[asset=base]] - 10000) : trigger.output[[asset=$asset]]}"}
 							]
 						}
 					},
@@ -155,9 +155,9 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 								asset: "base",
 								outputs: [
 									// fees are paid by the larger party, its output is send-all
-									// this party also collects the accumulated 10Kb bounce fees
-									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? $finalBalanceA : '' }"},
-									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? $finalBalanceB : '' }"},
+									// this party also collects the accumulated 10Kb bounce fees minus 10Kb to prevent abuse of confirmation bounce fees
+									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? ($finalBalanceA + 10000) : '' }"},
+									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? ($finalBalanceB + 10000) : '' }"},
 								]
 							}
 						},
@@ -168,9 +168,9 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 								asset: "base",
 								outputs: [
 									// fees are paid by the larger party, its output is send-all
-									// this party also collects the accumulated 10Kb bounce fees
-									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? 0 : '' }"},
-									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? 0 : '' }"},
+									// this party also collects the accumulated 10Kb bounce fees minus 10Kb to prevent abuse of confirmation bounce fees
+									{address: "{$addressA}", amount: "{ $finalBalanceA <  $finalBalanceB ? 10000 : '' }"},
+									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? 10000 : '' }"},
 								]
 							}
 						},
@@ -180,8 +180,6 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 							payload: {
 								asset: "{$asset}",
 								outputs: [
-									// fees are paid by the larger party, its output is send-all
-									// this party also collects the accumulated 10Kb bounce fees
 									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? $finalBalanceA : '' }"},
 									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? $finalBalanceB : '' }"},
 								]

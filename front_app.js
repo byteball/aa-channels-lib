@@ -329,10 +329,11 @@ function deposit(aa_address, amount, handle){
 			options.asset_outputs = [{ address: aa_address, amount: amount }];
 			options.base_outputs = [{ address: aa_address, amount: 10000 }];
 		}
-		headlessWallet.sendMultiPayment(options, function(error){
-			unlock();
+		headlessWallet.sendMultiPayment(options, function(error, unit){
 			if (error)
-				return handle("error when deposit to channel " + error);
+			return handle("error when deposit to channel " + error);
+			appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, amount, aa_address]);
+			unlock();
 			handle(null);
 		});
 	});

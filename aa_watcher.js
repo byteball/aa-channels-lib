@@ -135,7 +135,7 @@ function treatUnitsFromAA(arrUnits){
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
 						confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer); //peer is honest, we send confirmation for closing
 					} else {
-						confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+						await confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
 				await setLastUpdatedMciAndEventIdAndOthersFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
@@ -226,49 +226,54 @@ function treatClosingRequests(){
 
 
 function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_proof){
-	mutex.lock(['confirm_' + aa_address], function(unlock){
-		const composer = require('ocore/composer.js');
-		const network = require('ocore/network.js');
-		const callbacks = composer.getSavingCallbacks({
-			ifNotEnoughFunds: () => {
-				console.log("not enough fund to close channel");
-				unlock();
-			},
-			ifError: (error) => {
-				console.log("error when closing channel " + error);
-				unlock();
-			},
-			ifOk: function(objJoint){
-				network.broadcastJoint(objJoint);
-				unlock();
-			},
-			preCommitCb: (conn, objJoint, handle) => {
-				conn.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
-				handle();
-			},
-		})
+	return new Promise((resolve, reject) => {
+		mutex.lock(['confirm_' + aa_address], function(unlock){
+			const composer = require('ocore/composer.js');
+			const network = require('ocore/network.js');
+			const callbacks = composer.getSavingCallbacks({
+				ifNotEnoughFunds: () => {
+					console.log("not enough fund to close channel");
+					unlock();
+					resolve();
+				},
+				ifError: (error) => {
+					console.log("error when closing channel " + error);
+					unlock();
+					resolve();
+				},
+				ifOk: function(objJoint){
+					network.broadcastJoint(objJoint);
+					unlock();
+					resolve();
+				},
+				preCommitCb: (conn, objJoint, handle) => {
+					appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
+					handle();
+				},
+			})
 
-		if (fraud_proof){
-			var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
-		} else {
-			var payload = { confirm: 1, period: period };
-		}
-		if (credit_attributed_to_peer > 0)
-			payload.additionnalTransferredFromMe = credit_attributed_to_peer;
+			if (fraud_proof){
+				var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
+			} else {
+				var payload = { confirm: 1, period: period };
+			}
+			if (credit_attributed_to_peer > 0)
+				payload.additionnalTransferredFromMe = credit_attributed_to_peer;
 
-		const objMessage = {
-			app: 'data',
-			payload_location: "inline",
-			payload_hash: objectHash.getBase64Hash(payload),
-			payload: payload
-		};
+			const objMessage = {
+				app: 'data',
+				payload_location: "inline",
+				payload_hash: objectHash.getBase64Hash(payload),
+				payload: payload
+			};
 
-		composer.composeJoint({
-			paying_addresses: [my_address],
-			outputs: [{ address: my_address, amount: 0 }, { address: aa_address, amount: 10000 }],
-			signer: headlessWallet.signer,
-			messages: [objMessage],
-			callbacks: callbacks
+			composer.composeJoint({
+				paying_addresses: [my_address],
+				outputs: [{ address: my_address, amount: 0 }, { address: aa_address, amount: 10000 }],
+				signer: headlessWallet.signer,
+				messages: [objMessage],
+				callbacks: callbacks
+			});
 		});
 	});
 }
@@ -282,70 +287,3 @@ async function confirmClosingIfTimeoutReached(){
 }
 
 
-
-/*
-			//first condition
-			if (new_unit.amount && new_unit.amount >= 1e5 && (new_unit.output_address == my_address || new_unit.output_address == channel.peer_address)){
-				console.log("first condition met");
-				if (channel.status=='close_initiated_by_me' || channel.status=='close_initiated_by_peer')
-					await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-				else if (new_unit.output_address == my_address)
-					await setLastUpdatedMciAndEventIdAndOthersFields(true,{status:"open", amount_deposited_by_me: channel.amount_deposited_by_me + new_unit.amount});
-				else if (new_unit.output_address == channel.peer_address)
-					await setLastUpdatedMciAndEventIdAndOthersFields(true,{status:"open", amount_deposited_by_peer: channel.amount_deposited_by_peer + new_unit.amount});
-
-			} else if ( (new_unit.output_address == my_address || new_unit.output_address == channel.peer_address)
-			 && payload && payload.close && channel.status !='close_initiated_by_peer' && channel.status !='close_initiated_by_me' ){//second condition
-				var transferredFromMe = payload.transferredFromMe || 0;
-				if (transferredFromMe < 0)
-					await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-				else if (payload && typeof payload.sentByPeer == 'object'){
-						if (payload.sentByPeer.signed_message != 'object')
-							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-						else if (payload.sentByPeer.signed_message && payload.sentByPeer.signed_message.channel != channel.address)
-							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-						else if (payload.sentByPeer.signed_message && payload.sentByPeer.signed_message.period !== channel.period)
-							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-						else if (new_unit.output_address == my_address && !await promiseValidateSignedMessage(payload.sentByPeer.signed_message, my_address)||
-						new_unit.output_address == channel.peer_address && !await promiseValidateSignedMessage(payload.sentByPeer.signed_message, channel.peer_address))
-							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-						else if (!payload.sentByPeer.signed_message.amount_spent || payload.sentByPeer.signed_message.amount_spent < 0)
-							await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-						else
-							var transferredFromPeer = payload.sentByPeer.signed_message.amount_spent;
-						} else{
-							var transferredFromPeer = 0;
-							var my_final_balance = channel.amount_deposited_by_me - transferredFromMe + transferredFromPeer;
-							var peer_final_balance =  channel.amount_deposited_by_peer- transferredFromPeer + transferredFromMe;
-							if (my_final_balance < 0 || peer_final_balance < 0)
-								await setLastUpdatedMciAndEventIdAndOthersFields(false, false);
-							else
-								await setLastUpdatedMciAndEventIdAndOthersFields(true, );
-
-
-						}
-					console.log("payload " + JSON.stringify(payloads));
-
-					if (!payloads[0] || !payloads[0].payload){
-						setLastUpdatedMciAndEventIdAndOthersFields();
-						console.log("no message in " + new_unit.unit);
-					} else {
-					try{
-						var payload = JSON.parse(payloads[0].payload);
-					} catch (e){
-						setLastUpdatedMciAndEventIdAndOthersFields();
-						console.log("invalid payload" + e);
-					}
-					if (payload && payload.close && payload.transferredFromMe >=0 && new_unit.author_address == channel.client_address){
-						console.log("onPeerCloseChannel");
-						await onPeerCloseChannel(channel.aa_address, payload.transferredFromMe, new_unit.main_chain_index, channel);
-					} else if (payload.closed && new_unit.author_address == channel.aa_address ){
-						console.log("onClosedChannel");
-						if (payload.period != channel.period)
-							throw Error("period mismatches")
-					 await onClosedChannel(channel.aa_address, new_unit.main_chain_index);
-					}
-				}
-			}
-
-			 }*/
