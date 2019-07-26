@@ -1,9 +1,9 @@
 /*jslint node: true */
 "use strict";
-const db = require('ocore/db.js');
+const db = require('../modules/external_db.js');
 
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
-	aa_address CHAR(32) NOT NULL PRIMARY KEY, \n\
+	aa_address CHAR(32) BINARY NOT NULL PRIMARY KEY, \n\
 	version INTEGER DEFAULT 0,\n\
 	salt CHAR(60) UNIQUE NOT NULL,\n\
 	definition TEXT,\n\
@@ -28,16 +28,16 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	status VARCHAR(30) DEFAULT 'created',\n\
 	last_updated_mci INTEGER DEFAULT 0,\n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
-);");
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;"); 
 
 db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\
-	aa_address CHAR(32) NOT NULL, \n\
+	aa_address CHAR(32) BINARY NOT NULL, \n\
 	amount INTEGER NOT NULL,\n\
 	unit CHAR(44) NOT NULL,\n\
 	is_confirmed_by_aa TINYINT DEFAULT 0,\n\
-	UNIQUE (aa_address, unit)\n\
-);");
+	UNIQUE KEY byChannelAndUnit(aa_address, unit)\n\
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;");
 
 db.query("CREATE TABLE IF NOT EXISTS channels_config (\n\
-	my_address CHAR(32) \n\
-	);");
+	my_address CHAR(32) BINARY NOT NULL\n\
+) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;");

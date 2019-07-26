@@ -14,7 +14,8 @@ if (!conf.isHighAvaibilityNode){
 	require('./sql/create_sqlite_tables.js');
 	var appDB = require('ocore/db.js');
 } else {
-	var appDB = require('ocore/db.js');// to be replaced by external DB
+	require('./sql/create_mysql_tables.js');
+	var appDB = require('./modules/external_db.js');
 }
 
 var my_address;
@@ -24,7 +25,7 @@ eventBus.once('headless_wallet_ready', function(){
 
 	headlessWallet.readFirstAddress(async function(_my_address){
 		my_address = _my_address;
-		await appDB.query("INSERT " + dagDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
+		await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
 		treatUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
 		setInterval(lookForAndProcessTasks, 5000);
 	});

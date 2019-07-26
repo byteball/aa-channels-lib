@@ -7,7 +7,7 @@ var _ = require('lodash');
 var ValidationUtils = require("ocore/validation_utils.js");
 
 
-function validateSignedMessage(objSignedMessage, address, handleResult) {
+function validateSignedMessage(objSignedMessage, handleResult) {
 	if (typeof objSignedMessage !== 'object')
 		return handleResult("not an object");
 	if (ValidationUtils.hasFieldsExcept(objSignedMessage, ["signed_message", "authors", "last_ball_unit", "timestamp", "version"]))
@@ -19,86 +19,74 @@ function validateSignedMessage(objSignedMessage, address, handleResult) {
 	var authors = objSignedMessage.authors;
 	if (!ValidationUtils.isNonemptyArray(authors))
 		return handleResult("no authors");
-	if (!address && !ValidationUtils.isArrayOfLength(authors, 1))
-		return handleResult("authors not an array of len 1");
-	var the_author;
-	for (var i = 0; i < authors.length; i++){
-		var author = authors[i];
-		if (ValidationUtils.hasFieldsExcept(author, ['address', 'definition', 'authentifiers']))
-			return handleResult("foreign fields in author");
-		if (author.address === address)
-			the_author = author;
-		else if (!ValidationUtils.isValidAddress(author.address))
-			return handleResult("not valid address");
-		if (!ValidationUtils.isNonemptyObject(author.authentifiers))
-			return handleResult("no authentifiers");
-	}
-	if (!the_author) {
-		if (address)
-			return cb("not signed by the expected address");
-		the_author = authors[0];
-	}
-	var objAuthor = the_author;
 
-	
-	function validateOrReadDefinition(cb) {
+	if (authors.length > 1)
+		return handleResult("co signers not supported");
+
+	var objAuthor = authors[0];
+
+	if (ValidationUtils.hasFieldsExcept(objAuthor, ['address', 'definition', 'authentifiers']))
+		return handleResult("foreign fields in author");
+	else if (!ValidationUtils.isValidAddress(objAuthor.address))
+		return handleResult("not valid address");
+	if (!ValidationUtils.isNonemptyObject(objAuthor.authentifiers))
+		return handleResult("no authentifiers");
+
+	function validateDefinition(cb) {
 		var bHasDefinition = ("definition" in objAuthor);
 
-			if (!bHasDefinition)
-				return handleResult("no definition");
-			try {
-				if (objectHash.getChash160(objAuthor.definition) !== objAuthor.address)
-					return handleResult("wrong definition: " + objectHash.getChash160(objAuthor.definition) + "!==" + objAuthor.address);
-			} catch (e) {
-				return handleResult("failed to calc address definition hash: " + e);
-			}
-			cb(objAuthor.definition, -1, 0);
-		}
+		if (!bHasDefinition)
+			return handleResult("no definition");
 
-	validateOrReadDefinition(function (arrAddressDefinition, last_ball_mci, last_ball_timestamp) {
-		var objUnit = _.clone(objSignedMessage);
-		objUnit.messages = []; // some ops need it
+		const definition = objAuthor.definition;
+		if (!Array.isArray(definition))
+			return handleResult("unsupported definition");
+
+		if (definition[0] != 'sig')
+			return handleResult("unsupported definition");
+
+		if (typeof definition[1] != 'object')
+			return handleResult("unsupported definition");
+
 		try {
-			var objValidationState = {
-				unit_hash_to_sign: objectHash.getSignedPackageHashToSign(objSignedMessage),
-				last_ball_mci: last_ball_mci,
-				last_ball_timestamp: last_ball_timestamp,
-				bNoReferences: !bNetworkAware
-			};
+			if (objectHash.getChash160(definition) !== objAuthor.address)
+				return handleResult("wrong definition: " + objectHash.getChash160(definition) + "!==" + objAuthor.address);
+		} catch (e) {
+			return handleResult("failed to calc address definition hash: " + e);
+		}
+		cb(definition);
+	}
+
+	validateDefinition(function (definition) {
+		try {
+			var unit_hash_to_sign = objectHash.getSignedPackageHashToSign(objSignedMessage)
 		}
 		catch (e) {
 			return handleResult("failed to calc unit_hash_to_sign: " + e);
 		}
 		// passing db as null
-		validateAuthentifiers(objValidationState, objAuthor.authentifiers,
+		validateAuthentifiers(definition, unit_hash_to_sign, objAuthor.authentifiers,
 			function (err, res) {
 				if (err) // error in address definition
 					return handleResult(err);
 				if (!res) // wrong signature or the like
 					return handleResult("authentifier verification failed");
-				handleResult(null, last_ball_mci);
+				handleResult(null);
 			}
 		);
 	});
 }
 
 
-function validateAuthentifiers(objValidationState, assocAuthentifiers, cb){
-		var op = arr[0];
-		var args = arr[1];
-		if (op != 'sig')
-			return cb("unsupported definition");
-				var signature = assocAuthentifiers['r'];
-				if (!signature)
-					return cb("No signature at path r");
-				arrUsedPaths.push(path);
-				var algo = args.algo || 'secp256k1';
-				if (algo === 'secp256k1'){
-					var res = ecdsaSig.verify(objValidationState.unit_hash_to_sign, signature, args.pubkey);
-					if (!res)
-						return cb("error when checking signature at path r");
-					cb(null, res);
-				}
-	}
+function validateAuthentifiers(definition, unit_hash_to_sign, assocAuthentifiers, cb){
+	var signature = assocAuthentifiers['r'];
+	if (!signature)
+		return cb("No signature at path r");
+	var res = ecdsaSig.verify(unit_hash_to_sign, signature, definition[1].pubkey);
+	if (!res)
+		return cb("error when checking signature at path r");
+	cb(null, res);
+	
+}
 
 exports.validateSignedMessage = validateSignedMessage;

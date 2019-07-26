@@ -65,4 +65,4 @@ The exact setup depends of you need but you will likely use:
 - a load balancer that will redirect https requests to different front service instances.
 - an external MySQL database, ideally a fault tolerant cluster, to which front app and background app can connect to.
 
-Check specific documentation there: link-to-doc
+Check specific documentation there: https://github.com/Papabyte/aa-channels-lib/blob/master/doc/ha_mode.md

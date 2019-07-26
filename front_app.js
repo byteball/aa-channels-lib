@@ -31,7 +31,7 @@ var assocResponseByTag = {};
 var my_address;
 
 if (conf.isHighAvaibilityNode){
-	var appDB = require('ocore/db.js');// to be replaced by external DB
+	var appDB = require('./modules/external_db.js');
 } else {
 	var appDB = require('ocore/db.js');
 }
@@ -92,14 +92,13 @@ async function init(){
 		});
 		app.listen(conf.httpDefaultPort);
 	}
-
-	setInterval(autoRefillChannels, 30000);
+	if (!conf.isHighAvaibilityNode)
+		setInterval(autoRefillChannels, 30000);
 }
 
 
 // treat requests received either by messenger or POST http
 async function treatIncomingRequest(objRequest, handle){
-	console.log("treatIncomingRequest " + JSON.stringify(objRequest));
 
 	if (objRequest.timestamp < (Date.now() - REQUEST_TIMEOUT / 2))
 		return handle({ error: "Timestamp too old, check system time" });
@@ -118,6 +117,8 @@ async function treatIncomingRequest(objRequest, handle){
 			return handle({ error: "Unsupported aa version" });
 		if (!validationUtils.isValidAddress(objRequest.params.address))
 			return handle({ error: "Invalid payment address" });
+		if (objRequest.params.address == my_address)
+			return handle({ error: "this address is not yours" });
 		if (objRequest.params.url && !isUrl(objRequest.params.url))
 			return handle({ error: "Invalid url" });
 		if (objRequest.params.asset != 'base' && !validationUtils.isValidBase64(objRequest.params.asset, 44))
@@ -189,6 +190,9 @@ function treatPaymentFromPeer(objRequest, handle){
 
 			if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
 				return unlockAndHandle({ error: "payment_amount should be a positive integer" });
+
+			if (objSignedMessage.authors && objSignedMessage.authors[0] && objSignedMessage.authors[0].address != channel.peer_address)
+				return unlockAndHandle({ error: "package signed by wrong address expected : " + channel.peer_address});
 
 			const payment_amount = objSignedMessage.payment_amount;
 
@@ -412,9 +416,10 @@ function createNewChannel(peer, initial_amount, options, handle){
 		const response = responseFromPeer.response;
 		if (!validationUtils.isValidAddress(response.address_a))
 			return handle('address a is incorrect')
+		if (my_address == response.address_a)
+			return handle({ error: "this address is not yours" });
 		if (my_address != response.address_b)
 			return handle('address b is not mine');
-
 		const objCalculatedAAParameters = aaDefinitions.getAddressAndParametersForAA(response.address_a, my_address, salt, options.timeout, asset);
 		if (objCalculatedAAParameters.aa_address !== response.aa_address)
 			return handle('peer calculated different aa address');
@@ -467,7 +472,6 @@ function sendMessageAndPay(aa_address, message, payment_amount, handle){
 			handle(error, response);
 		}
 		const channels = await appDB.query("SELECT status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,amount_spent_by_me FROM channels WHERE aa_address=?", [aa_address]);
-
 
 		if (channels.length === 0)
 			return unlockAndHandle("AA address not found");
@@ -538,7 +542,7 @@ function signMessage(message, address){
 }
 
 
-function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, timeOutCb){
+function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 	const tag = crypto.randomBytes(30).toString('hex');
 	assocResponseByTag[tag] = responseCb;
 	objToBeSent.tag = tag;
@@ -546,13 +550,13 @@ function sendRequestToPeer(comLayer, peer_address, objToBeSent, responseCb, time
 		if (conf.isHighAvaibilityNode)
 			throw Error("obyte messenger no available in high avaibility mode");
 		const device = require('ocore/device.js');
-		device.sendMessageToDevice(peer_address, 'object', objToBeSent);
+		device.sendMessageToDevice(peer, 'object', objToBeSent);
 	} else if (comLayer == "http"){
-		request.post(peer_address + "post", {
+		request.post(peer + "post", {
 			json: objToBeSent
 		}, (error, res, body) => {
 			if (error || res.statusCode != 200){
-				return console.error("error in response from peer: " + peer_address + " " + JSON.stringify(res));
+				return console.error("error in response from peer: " + peer + " " + JSON.stringify(res));
 			}
 			if (assocResponseByTag[tag]) //if timeout not reached
 				delete assocResponseByTag[tag];
