@@ -587,9 +587,10 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 			options.base_outputs = [{ address: aa_address, amount: 10000 }];
 
 		}
-		headlessWallet.sendMultiPayment(options, function(error){
+		headlessWallet.sendMultiPayment(options, function(error, unit){
 			if (error)
 				reject("error when creating channel " + error);
+			appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, filling_amount, aa_address]);
 			resolve();
 		});
 
