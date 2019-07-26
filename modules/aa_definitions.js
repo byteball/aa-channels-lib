@@ -2,12 +2,13 @@ const objectHash = require('ocore/object_hash.js');
 const conf = require('ocore/conf.js');
 
 
-function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
+function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 
 	const arrDefinition = ['autonomous agent', {
 		init: `{
 			$close_timeout = '${timeout}';
 			$salt = '${salt}';
+			$asset = '${asset}';
 			$addressA = '${addressA}';
 			$addressB = '${addressB}';
 			$bFromA = (trigger.address == $addressA);
@@ -19,7 +20,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 		messages: {
 			cases: [
 				{ // one party fills or refills the AA
-					if: `{ $bFromParties AND trigger.output[[asset=base]] >= 1e5 }`,
+					if: `{ $bFromParties AND ($asset!='base' AND trigger.output[[asset=$asset]] > 0 OR $asset=='base' AND trigger.output[[asset=base]] > 10000)}`,
 					init: `{
 						if (var['close_initiated_by']){
 							$refused=1;
@@ -36,8 +37,8 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 						payload: {
 							open: 1,
 							period: "{$period}",
-							"{$addressA}":"{var['balanceA'] + ($party == 'A' ? trigger.output[[asset=base]] : 0)}",
-							"{$addressB}":"{var['balanceB'] + ($party == 'B' ? trigger.output[[asset=base]] : 0)}",
+							"{$addressA}":"{var['balanceA'] + ($party == 'A' ? trigger.output[[asset=$asset]] : 0)}",
+							"{$addressB}":"{var['balanceB'] + ($party == 'B' ? trigger.output[[asset=$asset]] : 0)}",
 							event_id :"{var['event_id'] otherwise 1}",
 							trigger_unit: "{trigger.unit}"
 						}
@@ -55,9 +56,9 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 						if:"{$refused}", //we refund sender if deposit is refused
 						app: 'payment',
 						payload: {
-							asset: "base",
+							asset: "{$asset}",
 							outputs: [
-								{address: "{trigger.address}", amount: "{trigger.output[[asset=base]]}"}
+								{address: "{trigger.address}", amount: "{trigger.output[[asset=$asset]]}"}
 							]
 						}
 					},
@@ -72,7 +73,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 									if (!var['period'])
 									var['period'] = 1;
 									$key = 'balance' || $party;
-									var[$key] += trigger.output[[asset=base]];
+									var[$key] += trigger.output[[asset=$asset]];
 								}
 							}`
 						}
@@ -148,9 +149,36 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 					}`,
 					messages: [
 						{
+							if:"{$asset == 'base'}",
 							app: 'payment',
 							payload: {
 								asset: "base",
+								outputs: [
+									// fees are paid by the larger party, its output is send-all
+									// this party also collects the accumulated 10Kb bounce fees
+									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? $finalBalanceA : '' }"},
+									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? $finalBalanceB : '' }"},
+								]
+							}
+						},
+						{
+							if:"{$asset != 'base'}",
+							app: 'payment',
+							payload: {
+								asset: "base",
+								outputs: [
+									// fees are paid by the larger party, its output is send-all
+									// this party also collects the accumulated 10Kb bounce fees
+									{address: "{$addressA}", amount: "{ $finalBalanceA < $finalBalanceB ? 0 : '' }"},
+									{address: "{$addressB}", amount: "{ $finalBalanceA >= $finalBalanceB ? 0 : '' }"},
+								]
+							}
+						},
+						{
+							if:"{$asset != 'base'}",
+							app: 'payment',
+							payload: {
+								asset: "{$asset}",
 								outputs: [
 									// fees are paid by the larger party, its output is send-all
 									// this party also collects the accumulated 10Kb bounce fees
@@ -210,6 +238,16 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 								]
 							}
 						},
+						{ if: "{$asset != 'base'}",
+							app: 'payment',
+							payload: {
+								asset: "{$asset}",
+								outputs: [
+									// send all
+									{address: "{trigger.address}"},
+								]
+							}
+						},
 						{
 							app: 'data',  //we add data to indicate the channel has been closed with a fraud proof submitted
 							payload: {
@@ -243,7 +281,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout){
 	}];
 
 	const aa_address = objectHash.getChash160(arrDefinition);
-	return {aa_address: aa_address, address_a: addressA, address_b: addressB,  timeout: timeout, salt: salt, arrDefinition: arrDefinition};
+	return {asset: asset, aa_address: aa_address, address_a: addressA, address_b: addressB,  timeout: timeout, salt: salt, arrDefinition: arrDefinition};
 }
 
 exports.getAddressAndParametersForAA = getAddressAndParametersForAA;

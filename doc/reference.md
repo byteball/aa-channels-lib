@@ -45,9 +45,10 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
 });
 ```
 - **peer**: peering address or http address of your peer.
-- **initial_amount**: initial amount in bytes you want to deposit to channel.
+- **initial_amount**: initial amount in asset or bytes you want to deposit to channel.
 - **options** object with the follwing attributes:
-  * timeout (optionnal): timeout in seconds for the channel
+  * timeout (optionnal): timeout in seconds for the channel.
+  * asset (optionnal): asset used for all transactions with this channel, if null bytes will be used.
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
 - **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
@@ -75,7 +76,7 @@ channels.sendMessageAndPay(aa_address, message_to_peer, amount, function(error, 
 ```
 - **aa_address**: address of the channel obtained through `createNewChannel` function or `channel_created_by_peer` event.
 - **message_to_peer**: string, object or number sent to peer alongside with the payment. It's likely be used to indicate what the payment is destinated to.
-- **amount**: amount in byte you want to pay.
+- **amount**: amount in bytes or assets you want to pay.
 - **error**: error returned by peer or if payment couldn't have been sent
 
 #### setCallBackForPaymentReceived
@@ -84,7 +85,7 @@ channels.setCallBackForPaymentReceived(function(amount, message_from_peer, aa_ad
 		return handle(error, response);
 });
 ```
-- **amount**: amount received in bytes
+- **amount**: amount received in bytes or assets
 - **message_to_peer**: string, object or number received from peer alongside with the payment.
 - **aa_address**: address of the channel that received payment
 - **error**: will be returned to peer if not null
