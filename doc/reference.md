@@ -49,6 +49,8 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
 - **options** object with the follwing attributes:
   * timeout (optionnal): timeout in seconds for the channel.
   * asset (optionnal): asset used for all transactions with this channel, if null bytes will be used.
+  * auto_refill_threshold (optionnal): amount that is automatically refilled if available amount on channel goes below a threshold.
+  * auto_refill_amount (optionnal): amount available amount under which the channel will be automatically refilled.
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
 - **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
@@ -56,13 +58,13 @@ The channel can be used only after some confirmation time for your deposit, list
 
 #### setAutoRefill
 ```javascript
-channels.setAutoRefill(aa_address, refill_amount, refill_threshold, function(error){
+channels.setAutoRefill(aa_address, auto_refill_amount, auto_refill_threshold, function(error){
 
 });
 ```
 - **aa_address**: address of the channel obtained through `createNewChannel` function or `channel_created_by_peer` event.
-- **refill_amount**: amount that is automatically refilled if available amount on channel goes below a threshold.
-- **refill_threshold**: amount available amount under which the channel will be automatically refilled.
+- **auto_refill_amount**: amount that is automatically refilled if available amount on channel goes below a threshold.
+- **auto_refill_threshold**: amount available amount under which the channel will be automatically refilled.
 - **error**: error returned if setting failed.
 
 #### sendMessageAndPay

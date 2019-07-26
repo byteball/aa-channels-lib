@@ -26,7 +26,6 @@ if (conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvaibilityNo
 if (!validationUtils.isPositiveInteger(conf.minChannelTimeoutInSecond) || !validationUtils.isPositiveInteger(conf.maxChannelTimeoutInSecond))
 	throw Error("minChannelTimeoutInSecond and maxChannelTimeoutInSecond in conf.js must be postive integer");
 
-
 var paymentReceivedCallback;
 var assocResponseByTag = {};
 var my_address;
@@ -354,7 +353,11 @@ function createNewChannel(peer, initial_amount, options, handle){
 		return handle("asset is not valid");
 	if (!options.asset && initial_amount <= 1e5)
 		return handle("initial_amount must be > 1e5");
-
+	if (options.auto_refill_threshold && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
+		return handle("auto_refill_threshold must be positive integer");
+	if (options.auto_refill_amount && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
+		return handle("auto_refill_threshold must be positive integer");
+	
 	const asset = options.asset || 'base';
 	const salt = crypto.randomBytes(30).toString('hex');
 	let matches = peer.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
@@ -416,8 +419,10 @@ function createNewChannel(peer, initial_amount, options, handle){
 		if (objCalculatedAAParameters.aa_address !== response.aa_address)
 			return handle('peer calculated different aa address');
 
-		const result = await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?,?)",
-			[asset, options.timeout, response.aa_address, salt, response.address_a, correspondent_address || null, peer_url || null]);
+		const result = await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels \n\
+		(auto_refill_threshold,auto_refill_amount, asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url) \n\
+		VALUES (?,?,?,?,?,?,?,?,?)",
+		[options.auto_refill_threshold, options.auto_refill_amount, asset, options.timeout, response.aa_address, salt, response.address_a, correspondent_address || null, peer_url || null]);
 		if (result.affectedRows !== 1)
 			return handle("this salt already exists");
 		else {
@@ -601,7 +606,7 @@ function autoRefillChannels(){
 	mutex.lock(["autoRefillChannels"], async function(unlock){
 		const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
 		IFNULL((SELECT SUM(amount) FROM pending_deposits WHERE pending_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
-		FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold");
+		FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold"); //pending deposits are taken into account when comparing with auto_refill_threshold
 		async.eachSeries(rows, function(row, cb){
 			deposit(row.aa_address, row.auto_refill_amount, function(error){
 				if (error)
