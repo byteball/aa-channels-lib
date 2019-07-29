@@ -199,7 +199,7 @@ function treatPaymentFromPeer(objRequest, handle){
 			if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
 				return unlockAndHandle({ error: "AA not funded enough" });
 
-			const delta_amount_spent = (objSignedMessage.amount_spent - channel.amount_spent_by_peer) > 0 ? (objSignedMessage.amount_spent - channel.amount_spent_by_peer) : 0;
+			const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
 			const peer_credit = delta_amount_spent + channel.credit_attributed_to_peer;
 
 			if (payment_amount > peer_credit)
