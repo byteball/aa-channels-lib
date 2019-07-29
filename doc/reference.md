@@ -51,6 +51,7 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
   * asset (optionnal): asset used for all transactions with this channel, if null bytes will be used.
   * auto_refill_threshold (optionnal): amount that is automatically refilled if available amount on channel goes below a threshold.
   * auto_refill_amount (optionnal): amount available amount under which the channel will be automatically refilled.
+  * salt (optionnal): string that will be placed in the AA definition with no other purpose that generating a different AA address than other channels created with same peer addresses. It's especially useful when parties want to transact using several channels in parallel. If set to true, a random 50 characters salt with be used. 
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
 - **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.

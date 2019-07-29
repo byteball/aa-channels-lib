@@ -181,21 +181,6 @@ function treatClosingRequests(){
 			return unlock();
 
 		async.eachSeries(rows, function(row, cb){
-			const composer = require('ocore/composer.js');
-			const network = require('ocore/network.js');
-			const callbacks = composer.getSavingCallbacks({
-				ifNotEnoughFunds: () => {
-					cb();
-				},
-				ifError: (error) => {
-					cb();
-				},
-				ifOk: function(objJoint){
-					appDB.query("UPDATE channels SET status='closing_initiated_by_me',closing_authored=0 WHERE aa_address=?", [row.aa_address]);
-					network.broadcastJoint(objJoint);
-					cb();
-				}
-			})
 
 			const payload = { close: 1, period: row.period };
 			if (row.amount_spent_by_me > 0)
@@ -203,19 +188,23 @@ function treatClosingRequests(){
 			if (row.amount_spent_by_peer > 0)
 				payload.sentByPeer = JSON.parse(row.last_message_from_peer);
 
-			const objMessage = {
-				app: 'data',
-				payload_location: "inline",
-				payload_hash: objectHash.getBase64Hash(payload),
-				payload: payload
-			};
-
-			composer.composeJoint({
-				paying_addresses: [my_address],
-				outputs: [{ address: my_address, amount: 0 }, { address: row.aa_address, amount: 10000 }],
-				signer: headlessWallet.signer,
-				messages: [objMessage],
-				callbacks: callbacks
+			const options = {
+				messages: [{
+					app: 'data',
+					payload_location: "inline",
+					payload_hash: objectHash.getBase64Hash(payload),
+					payload: payload
+				}],
+				change_address: my_address,
+				base_outputs: [{ address: row.aa_address, amount: 10000 }]
+			}
+	
+			headlessWallet.sendMultiPayment(options, async function(error, unit){
+				if (error)
+					handle("error when closing channel " + error);
+				else
+					await appDB.query("UPDATE channels SET status='closing_initiated_by_me',closing_authored=0 WHERE aa_address=?", [row.aa_address]);
+				cb();
 			});
 		},
 			function(){
@@ -229,30 +218,6 @@ function treatClosingRequests(){
 function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_proof){
 	return new Promise((resolve, reject) => {
 		mutex.lock(['confirm_' + aa_address], function(unlock){
-			const composer = require('ocore/composer.js');
-			const network = require('ocore/network.js');
-			const callbacks = composer.getSavingCallbacks({
-				ifNotEnoughFunds: () => {
-					console.log("not enough fund to close channel");
-					unlock();
-					resolve();
-				},
-				ifError: (error) => {
-					console.log("error when closing channel " + error);
-					unlock();
-					resolve();
-				},
-				ifOk: function(objJoint){
-					network.broadcastJoint(objJoint);
-					unlock();
-					resolve();
-				},
-				preCommitCb: (conn, objJoint, handle) => {
-					appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
-					handle();
-				},
-			})
-
 			if (fraud_proof){
 				var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
 			} else {
@@ -261,20 +226,26 @@ function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_pro
 			if (credit_attributed_to_peer > 0)
 				payload.additionnalTransferredFromMe = credit_attributed_to_peer;
 
-			const objMessage = {
-				app: 'data',
-				payload_location: "inline",
-				payload_hash: objectHash.getBase64Hash(payload),
-				payload: payload
-			};
-
-			composer.composeJoint({
-				paying_addresses: [my_address],
-				outputs: [{ address: my_address, amount: 0 }, { address: aa_address, amount: 10000 }],
-				signer: headlessWallet.signer,
-				messages: [objMessage],
-				callbacks: callbacks
+			const options = {
+				messages: [{
+					app: 'data',
+					payload_location: "inline",
+					payload_hash: objectHash.getBase64Hash(payload),
+					payload: payload
+				}],
+				change_address: my_address,
+				base_outputs: [{ address: aa_address, amount: 10000 }]
+			}
+	
+			headlessWallet.sendMultiPayment(options, async function(error, unit){
+				if (error)
+					console.log("error when closing channel " + error);
+				else
+					await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
+				unlock();
+				resolve();
 			});
+
 		});
 	});
 }

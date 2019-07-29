@@ -5,7 +5,7 @@ const db = require('ocore/db.js');
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	aa_address CHAR(32) NOT NULL PRIMARY KEY, \n\
 	version INTEGER DEFAULT 0,\n\
-	salt CHAR(60) UNIQUE NOT NULL,\n\
+	salt VARCHAR(50) DEFAULT NULL,\n\
 	definition TEXT,\n\
 	asset CHAR(44) DEFAULT NULL,\n\
 	peer_address CHAR(32) NOT NULL, \n\
@@ -27,7 +27,8 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	closing_authored TINYINT DEFAULT 0,\n\
 	status VARCHAR(30) DEFAULT 'created',\n\
 	last_updated_mci INTEGER DEFAULT 0,\n\
-	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
+	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
+	UNIQUE (peer_address, salt)\n\
 );");
 
 db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\

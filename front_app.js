@@ -105,8 +105,10 @@ async function treatIncomingRequest(objRequest, handle){
 	if (objRequest.command == 'create_channel'){
 		if (typeof objRequest.params != "object")
 			return handle({ error: "No params" });
-		if (!validationUtils.isStringOfLength(objRequest.params.salt, 60))
-			return handle({ error: "Invalid salt" });
+		if (objRequest.params.salt && !validationUtils.isNonemptyString(objRequest.params.salt))
+			return handle({ error: "Salt must be string" });
+		if (objRequest.params.salt && objRequest.params.salt.length > 50)
+			return handle({ error: "Salt must be 50 char max" });
 		if (!validationUtils.isPositiveInteger(objRequest.params.timeout))
 			return handle({ error: "Channel timeout must be positive integer" });
 		if (objRequest.params.timeout > conf.maxChannelTimeoutInSecond)
@@ -224,7 +226,7 @@ function treatPaymentFromPeer(objRequest, handle){
 
 
 function createNewChannelOnPeerRequest(objRequest, handle){
-	const objAAParameters = aaDefinitions.getAddressAndParametersForAA(my_address, objRequest.params.address, objRequest.params.salt, objRequest.params.timeout,objRequest.params.asset);
+	const objAAParameters = aaDefinitions.getAddressAndParametersForAA(my_address, objRequest.params.address, objRequest.params.timeout,objRequest.params.asset, objRequest.params.salt);
 	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?,?)",
 		[objAAParameters.asset, objAAParameters.timeout, objAAParameters.aa_address, objRequest.params.salt, objRequest.params.address, objRequest.from_address, objRequest.url], function(result){
 
@@ -249,24 +251,6 @@ async function close(aa_address, handle){
 		if (channels.length === 0)
 			return handle("unknown AA address");
 		const channel = channels[0];
-		const composer = require('ocore/composer.js');
-		const network = require('ocore/network.js');
-		const callbacks = composer.getSavingCallbacks({
-			ifNotEnoughFunds: () => {
-				handle("not enough fund to close channel");
-			},
-			ifError: (error) => {
-				handle("error when closing channel " + error);
-			},
-			preCommitCb: function(conn, objJoint, cb){
-				conn.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=?", [aa_address]);
-				cb();
-			},
-			ifOk: function(objJoint){
-				network.broadcastJoint(objJoint);
-				handle(null);
-			}
-		})
 
 		const payload = { close: 1, period: channel.period };
 		if (channel.amount_spent_by_me + channel.credit_attributed_to_peer > 0)
@@ -274,20 +258,25 @@ async function close(aa_address, handle){
 		if (channel.amount_spent_by_peer > 0)
 			payload.sentByPeer = JSON.parse(channel.last_message_from_peer);
 
-		const objMessage = {
-			app: 'data',
-			payload_location: "inline",
-			payload_hash: objectHash.getBase64Hash(payload),
-			payload: payload
-		};
+		const options = {
+			messages: [{
+				app: 'data',
+				payload_location: "inline",
+				payload_hash: objectHash.getBase64Hash(payload),
+				payload: payload
+			}],
+			change_address: my_address,
+			base_outputs: [{ address: aa_address, amount: 10000 }]
+		}
 
-		composer.composeJoint({
-			paying_addresses: [my_address],
-			outputs: [{ address: my_address, amount: 0 }, { address: aa_address, amount: 10000 }],
-			signer: headlessWallet.signer,
-			messages: [objMessage],
-			callbacks: callbacks
+		headlessWallet.sendMultiPayment(options, function(error, unit){
+			if (error)
+				handle("error when closing channel " + error);
+			else
+				appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=?", [aa_address]);
+
 		});
+
 	} else {
 		//order aa watcher to close channel
 		const result = await appDB.query("UPDATE channels SET closing_authored=1 FROM channels WHERE aa_address=?", [aa_address]);
@@ -332,12 +321,15 @@ function deposit(aa_address, amount, handle){
 			options.asset_outputs = [{ address: aa_address, amount: amount }];
 			options.base_outputs = [{ address: aa_address, amount: 10000 }];
 		}
-		headlessWallet.sendMultiPayment(options, function(error, unit){
-			if (error)
-			return handle("error when deposit to channel " + error);
-			appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, amount, aa_address]);
-			unlock();
-			handle(null);
+		headlessWallet.sendMultiPayment(options, async function(error, unit){
+			if (error){
+				unlock();
+				return handle("error when deposit to channel " + error);
+			} else{
+				await appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, amount, aa_address]);
+				unlock();
+				return handle(null);
+			}
 		});
 	});
 }
@@ -361,20 +353,32 @@ function createNewChannel(peer, initial_amount, options, handle){
 		return handle("auto_refill_threshold must be positive integer");
 	if (options.auto_refill_amount && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
 		return handle("auto_refill_threshold must be positive integer");
-	
+	if (validationUtils.isNonemptyString(options.salt) && options.salt.length > 50)
+		return handle({ error: "Salt must be 50 char max" });
+
 	const asset = options.asset || 'base';
-	const salt = crypto.randomBytes(30).toString('hex');
+
+	if (validationUtils.isNonemptyString(options.salt))
+		var salt = options.salt;
+	else if (options.salt === true)
+		var salt = crypto.randomBytes(25).toString('hex');
+	else
+		var salt = null;
+
 	let matches = peer.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
 
 	const objToBeSent = {
 		command: "create_channel",
 		params: {
-			salt: salt,
 			address: my_address,
 			timeout: options.timeout || conf.defaultTimeoutInSecond,
 			asset: asset
 		}
 	}
+
+	if (salt)
+		objToBeSent.params.salt = salt;
+
 	const responseCb = function(responseFromPeer){
 		treatResponseToChannelCreation(responseFromPeer, function(error, response){
 			if (error)
@@ -420,7 +424,7 @@ function createNewChannel(peer, initial_amount, options, handle){
 			return handle({ error: "this address is not yours" });
 		if (my_address != response.address_b)
 			return handle('address b is not mine');
-		const objCalculatedAAParameters = aaDefinitions.getAddressAndParametersForAA(response.address_a, my_address, salt, options.timeout, asset);
+		const objCalculatedAAParameters = aaDefinitions.getAddressAndParametersForAA(response.address_a, my_address, options.timeout, asset, salt);
 		if (objCalculatedAAParameters.aa_address !== response.aa_address)
 			return handle('peer calculated different aa address');
 
@@ -596,10 +600,11 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 			options.base_outputs = [{ address: aa_address, amount: 10000 }];
 
 		}
-		headlessWallet.sendMultiPayment(options, function(error, unit){
+		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				reject("error when creating channel " + error);
-			appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, filling_amount, aa_address]);
+			else
+				await appDB.query("INSERT INTO pending_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, filling_amount, aa_address]);
 			resolve();
 		});
 

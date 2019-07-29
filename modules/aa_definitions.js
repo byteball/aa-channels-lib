@@ -2,12 +2,12 @@ const objectHash = require('ocore/object_hash.js');
 const conf = require('ocore/conf.js');
 
 
-function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
+function getAddressAndParametersForAA(addressA, addressB, timeout, asset, salt){
 
 	const arrDefinition = ['autonomous agent', {
 		init: `{
 			$close_timeout = ${timeout};
-			$salt = '${salt}';
+			${salt ? "$salt='" + salt +"';": ""}
 			$asset = '${asset}';
 			$addressA = '${addressA}';
 			$addressB = '${addressB}';
@@ -95,7 +95,7 @@ function getAddressAndParametersForAA(addressA, addressB, salt, timeout, asset){
 							if (!is_valid_signed_package(trigger.data.sentByPeer, $bFromB ? $addressA : $addressB))
 								bounce('invalid signature by peer');
 							$transferredFromPeer = trigger.data.sentByPeer.signed_message.amount_spent;
-							if ((!$transferredFromPeer AND $transferredFromPeer !=0) || $transferredFromPeer < 0)
+							if ((!$transferredFromPeer AND $transferredFromPeer !=0) OR $transferredFromPeer < 0)
 								bounce('bad amount spent by peer: ' || $transferredFromPeer);
 						}
 						else

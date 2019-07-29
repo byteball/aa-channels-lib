@@ -5,7 +5,7 @@ const db = require('../modules/external_db.js');
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	aa_address CHAR(32) BINARY NOT NULL PRIMARY KEY, \n\
 	version INTEGER DEFAULT 0,\n\
-	salt CHAR(60) UNIQUE NOT NULL,\n\
+	salt VARCHAR(50) DEFAULT NULL,\n\
 	definition TEXT,\n\
 	asset CHAR(44) DEFAULT NULL,\n\
 	peer_address CHAR(32) NOT NULL, \n\
@@ -28,6 +28,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	status VARCHAR(30) DEFAULT 'created',\n\
 	last_updated_mci INTEGER DEFAULT 0,\n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
+	UNIQUE KEY bySaltAndPeerAddressUnit(peer_address, salt)\n\
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;"); 
 
 db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\
