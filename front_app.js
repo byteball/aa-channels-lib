@@ -13,7 +13,7 @@ const async = require('async');
 
 const REQUEST_TIMEOUT = 8 * 1000;
 
-if (!conf.isHighAvaibilityNode){
+if (!conf.isHighAvailabilityNode){
 	require('./aa_watcher.js');
 	var signedMessage = require('ocore/signed_message.js');
 	var headlessWallet = require('headless-obyte');
@@ -21,7 +21,7 @@ if (!conf.isHighAvaibilityNode){
 	var signedMessage = require('./modules/signed_message.js'); // light version that doesn't require DAG DB
 }
 
-if (conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvaibilityNode)
+if (conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvailabilityNode)
 	throw Error("Cannot use obyte-messenger layer as high avaibility node");
 if (!validationUtils.isPositiveInteger(conf.minChannelTimeoutInSecond) || !validationUtils.isPositiveInteger(conf.maxChannelTimeoutInSecond))
 	throw Error("minChannelTimeoutInSecond and maxChannelTimeoutInSecond in conf.js must be postive integer");
@@ -30,18 +30,18 @@ var paymentReceivedCallback;
 var assocResponseByTag = {};
 var my_address;
 
-if (conf.isHighAvaibilityNode){
+if (conf.isHighAvailabilityNode){
 	var appDB = require('./modules/external_db.js');
 } else {
 	var appDB = require('ocore/db.js');
 }
 
-if (!conf.isHighAvaibilityNode){ // if another node is used as watcher, it is in charge to create table
+if (!conf.isHighAvailabilityNode){ // if another node is used as watcher, it is in charge to create table
 	require('./sql/create_sqlite_tables.js');
 }
 
 
-if (conf.isHighAvaibilityNode){
+if (conf.isHighAvailabilityNode){
 	setTimeout(init, 1000);
 
 } else {
@@ -92,7 +92,7 @@ async function init(){
 		});
 		app.listen(conf.httpDefaultPort);
 	}
-	if (!conf.isHighAvaibilityNode)
+	if (!conf.isHighAvailabilityNode)
 		setInterval(autoRefillChannels, 30000);
 }
 
@@ -244,7 +244,7 @@ function setCallBackForPaymentReceived(_cb){
 }
 
 async function close(aa_address, handle){
-	if (!conf.isHighAvaibilityNode){
+	if (!conf.isHighAvailabilityNode){
 		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, credit_attributed_to_peer FROM channels WHERE aa_address=?", [aa_address]);
 		if (channels.length === 0)
 			return handle("unknown AA address");
@@ -300,7 +300,7 @@ async function close(aa_address, handle){
 
 
 function deposit(aa_address, amount, handle){
-	if (conf.isHighAvaibilityNode)
+	if (conf.isHighAvailabilityNode)
 		return handle("high availability node can only receive funds");
 	if (!validationUtils.isPositiveInteger(amount))
 		return handle("amount must be positive integer");
@@ -345,7 +345,7 @@ function deposit(aa_address, amount, handle){
 
 function createNewChannel(peer, initial_amount, options, handle){
 	options = options || {};
-	if (conf.isHighAvaibilityNode)
+	if (conf.isHighAvailabilityNode)
 		return handle("high availability node cannot create channel");
 	if (!my_address)
 		return handle("not initialized");
@@ -384,7 +384,7 @@ function createNewChannel(peer, initial_amount, options, handle){
 	}
 
 	if (matches){ //it's a pairing address
-		if (conf.isHighAvaibilityNode)
+		if (conf.isHighAvailabilityNode)
 			return handle("pairing address cannot be used in high availability mode");
 		var correspondent_address;
 		var peer_url;
@@ -461,7 +461,7 @@ function askIfChannelOpen(comLayer, peer, aa_address){
 }
 
 function sendMessageAndPay(aa_address, message, payment_amount, handle){
-	if (conf.isHighAvaibilityNode)
+	if (conf.isHighAvailabilityNode)
 		return handle("high availability node can only receive payment");
 	if (!my_address)
 		return handle("not initialized");
@@ -478,7 +478,7 @@ function sendMessageAndPay(aa_address, message, payment_amount, handle){
 
 		const channel = channels[0];
 
-		if (channel.peer_device_address && conf.isHighAvaibilityNode)
+		if (channel.peer_device_address && conf.isHighAvailabilityNode)
 			return unlockAndHandle("device address cannot be used in high availability mode");
 
 		if (channel.status != "open" && channel.status != "open_confirmed_by_peer")
@@ -547,7 +547,7 @@ function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 	assocResponseByTag[tag] = responseCb;
 	objToBeSent.tag = tag;
 	if (comLayer == "obyte-messenger"){
-		if (conf.isHighAvaibilityNode)
+		if (conf.isHighAvailabilityNode)
 			throw Error("obyte messenger no available in high avaibility mode");
 		const device = require('ocore/device.js');
 		device.sendMessageToDevice(peer, 'object', objToBeSent);

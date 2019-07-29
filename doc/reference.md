@@ -27,7 +27,7 @@ exports.minChannelTimeoutInSecond = 600;  // timeout value under which channel c
 exports.maxChannelTimeoutInSecond = 1000; // timeout value above which channel creation request will be refused
 exports.defaultTimeoutInSecond = 600;. // default timeout value for channels created by me
 
-exports.isHighAvaibilityNode =  false;
+exports.isHighAvailabilityNode =  false;
 
 exports.enabledReceivers = ['http','obyte-messenger']; //configure the communication layers that can receive a message from peer
 // if 'http' is present, a http server will start to listen at port httpDefaultPort

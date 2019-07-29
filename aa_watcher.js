@@ -10,7 +10,7 @@ const objectHash = require('ocore/object_hash.js');
 const async = require('async');
 
 
-if (!conf.isHighAvaibilityNode){
+if (!conf.isHighAvailabilityNode){
 	require('./sql/create_sqlite_tables.js');
 	var appDB = require('ocore/db.js');
 } else {
@@ -48,7 +48,7 @@ function lookForAndProcessTasks(){
 	if (conf.bLight)
 		updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
-	if (conf.isHighAvaibilityNode)
+	if (conf.isHighAvailabilityNode)
 		treatClosingRequests();
 }
 
@@ -105,7 +105,7 @@ function treatUnitsFromAA(arrUnits){
 			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
 			console.log("payload: " + payload);
 
-			async function setLastUpdatedMciAndEventIdAndOthersFields(fields){
+			async function setLastUpdatedMciAndEventIdAndOtherFields(fields){
 				var strSetFields = "";
 				if (fields)
 					for (var key in fields){
@@ -119,7 +119,7 @@ function treatUnitsFromAA(arrUnits){
 			//channel is open and received funding
 			if (payload && payload.open){
 				await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
-				await setLastUpdatedMciAndEventIdAndOthersFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
+				await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
 				if (payload[my_address] > 0)
 					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
 				else
@@ -139,11 +139,11 @@ function treatUnitsFromAA(arrUnits){
 						await confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
-				await setLastUpdatedMciAndEventIdAndOthersFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
+				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
 			}
 			//AA confirms that channel is closed
 			if (payload && payload.closed){
-				await setLastUpdatedMciAndEventIdAndOthersFields(
+				await setLastUpdatedMciAndEventIdAndOtherFields(
 					{
 						status: "closed",
 						period: payload.period,
@@ -166,7 +166,7 @@ function treatUnitsFromAA(arrUnits){
 				const result = await appDB.query("UPDATE pending_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
 				if (result.affectedRows !== 0)
 					eventBus.emit("refused_deposit", payload.trigger_unit);
-				await setLastUpdatedMciAndEventIdAndOthersFields({});
+				await setLastUpdatedMciAndEventIdAndOtherFields({});
 			}
 		}
 		unlock();

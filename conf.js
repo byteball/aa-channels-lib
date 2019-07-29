@@ -12,7 +12,7 @@ exports.minChannelTimeoutInSecond = 600;
 exports.maxChannelTimeoutInSecond = 1000;
 exports.defaultTimeoutInSecond = 600;
 
-exports.isHighAvaibilityNode =  false;
+exports.isHighAvailabilityNode =  false;
 
 exports.enabledReceivers = ['http','obyte-messenger']; //configure the communication layers that can receive a message from peer
 // if 'http' is present, a http server will start to listen at port httpDefaultPort
