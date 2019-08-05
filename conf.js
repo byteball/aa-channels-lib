@@ -20,4 +20,8 @@ exports.enabledReceivers = ['http','obyte-messenger']; //configure the communica
 
 exports.httpDefaultPort = 6800;
 
+exports.giveAndExpectResponse = true;
+
+exports.createChannelUnilateraly = false;
+
 console.log('finished AA-channel-lib conf');

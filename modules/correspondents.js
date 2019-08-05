@@ -57,3 +57,17 @@ exports.findCorrespondentByPairingCode = (code, cb) => {
 		return cb(rows.length ? rows[0] : null);
 	});
 };
+
+exports.findOrAddCorrespondentByPairingCode = (code, cb) => {
+	correspondents.findCorrespondentByPairingCode(code, (correspondent) => {
+		if (!correspondent){
+			correspondents.addCorrespondent(peer, 'Payment channel peer', (err, device_address) => {
+				if (err)
+					return cb(err);
+					cb(null, device_address);
+			});
+		} else {
+			cb(null, correspondent.device_address);
+		}
+	});
+}
