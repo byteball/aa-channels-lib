@@ -16,7 +16,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
 	amount_possibly_lost_by_me INTEGER DEFAULT 0,\n\
-	credit_attributed_to_peer INTEGER DEFAULT 0,\n\
+	overpayment_from_peer INTEGER DEFAULT 0,\n\
 	auto_refill_threshold INTEGER DEFAULT 0,\n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\
 	close_timestamp INTEGER,\n\
@@ -27,7 +27,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	closing_authored TINYINT DEFAULT 0,\n\
 	status VARCHAR(30) DEFAULT 'created',\n\
 	last_updated_mci INTEGER DEFAULT 0,\n\
-	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
+	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE KEY bySaltAndPeerAddressUnit(peer_address, salt)\n\
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;"); 
 

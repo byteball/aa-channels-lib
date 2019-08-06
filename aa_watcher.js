@@ -22,7 +22,7 @@ var my_address;
 
 
 eventBus.once('headless_wallet_ready', function(){
-
+	console.error("headless_wallet_ready watcher");
 	headlessWallet.readFirstAddress(async function(_my_address){
 		my_address = _my_address;
 		await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
@@ -93,6 +93,8 @@ function treatUnitsFromAA(arrUnits){
 			return console.log("nothing concerns payment channel in these units");
 		}
 
+
+
 		for (var i = 0; i < new_units.length; i++){
 			var new_unit = new_units[i];
 			var channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
@@ -103,18 +105,28 @@ function treatUnitsFromAA(arrUnits){
 
 			var channel = channels[0];
 			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
-			console.log("payload: " + payload);
 
 			async function setLastUpdatedMciAndEventIdAndOtherFields(fields){
-				var strSetFields = "";
-				if (fields)
-					for (var key in fields){
-						strSetFields += "," + key + "='" + fields[key] + "'";
+				return new Promise(async (resolve, reject) => {
+					var strSetFields = "";
+					if (fields)
+						for (var key in fields){
+							strSetFields += "," + key + "='" + fields[key] + "'";
+						}
+
+					if (conf.isHighAvailabilityNode) {
+						appDB.takeappDBectionFromPool(async function(conn) {
+							await	conn.query("SELECT GET_LOCK(?,1)",[new_unit.author_address]);
+							await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
+							await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
+							return resolve();
+						})
+					} else {
+						await appDB.query("UPDATE channels SET last_updated_mci=?,last_event_id=?" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
+						return resolve();
 					}
-				await appDB.query("UPDATE channels SET last_updated_mci=?,last_event_id=?" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
+				});
 			}
-
-
 
 			//channel is open and received funding
 			if (payload && payload.open){
@@ -124,7 +136,6 @@ function treatUnitsFromAA(arrUnits){
 					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
 				else
 					eventBus.emit("peer_deposit_became_stable", payload[channel.peer_address], payload.trigger_unit);
-
 			}
 
 			//closing requested by one party
@@ -134,9 +145,9 @@ function treatUnitsFromAA(arrUnits){
 				else {
 					var status = "closing_initiated_by_peer";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
-						confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer); //peer is honest, we send confirmation for closing
+						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
 					} else {
-						await confirmClosing(new_unit.author_address, payload.period, channel.credit_attributed_to_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+						await confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
@@ -151,7 +162,7 @@ function treatUnitsFromAA(arrUnits){
 						amount_spent_by_me: 0,
 						amount_deposited_by_peer: 0,
 						amount_deposited_by_me: 0,
-						credit_attributed_to_peer: 0,
+						overpayment_from_peer: 0,
 						amount_possibly_lost_by_me: 0,
 						last_message_from_peer: ''
 					});
@@ -215,7 +226,7 @@ function treatClosingRequests(){
 }
 
 
-function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_proof){
+function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 	return new Promise((resolve, reject) => {
 		mutex.lock(['confirm_' + aa_address], function(unlock){
 			if (fraud_proof){
@@ -223,8 +234,8 @@ function confirmClosing(aa_address, period, credit_attributed_to_peer, fraud_pro
 			} else {
 				var payload = { confirm: 1, period: period };
 			}
-			if (credit_attributed_to_peer > 0)
-				payload.additionnalTransferredFromMe = credit_attributed_to_peer;
+			if (overpayment_from_peer > 0)
+				payload.additionnalTransferredFromMe = overpayment_from_peer;
 
 			const options = {
 				messages: [{
