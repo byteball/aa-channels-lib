@@ -116,7 +116,9 @@ function treatUnitsFromAA(arrUnits){
 
 					if (conf.isHighAvailabilityNode) {
 						appDB.takeappDBectionFromPool(async function(conn) {
-							await	conn.query("SELECT GET_LOCK(?,1)",[new_unit.author_address]);
+							var results = await	conn.query("SELECT GET_LOCK(?,1)",[new_unit.author_address]);
+							if (!results[0].my_lock || results[0].my_lock === 0)
+								return;
 							await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
 							await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
 							return resolve();

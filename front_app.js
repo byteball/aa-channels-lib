@@ -189,57 +189,24 @@ function treatPaymentFromPeer(objRequest, handle){
 
 		const payment_amount = objSignedMessage.payment_amount;
 
-		if (conf.isHighAvailabilityNode)
-			treatPaymentWithMySQL(); // we have to use lock from MySQL in case several nodes share the same DB
-		else
-			treatPaymentWithSQLite(); // this DB is never shared thus we can simply use javascript mutex
-
-		async function treatPaymentWithMySQL() {
-			appDB.takeConnectionFromPool(async function(conn) {
-				await	conn.query("SELECT @lock:=GET_LOCK(?,1)",[objSignedMessage.channel]);
-				await	conn.query("SET @payment_amount=?,@amount_spent=?,@osmPeriod=?",[payment_amount, objSignedMessage.amount_spent,objSignedMessage.period]);
-				await	conn.query("SELECT 	@status:=status,@period:=period,@amount_deposited_by_peer:=@amount_deposited_by_peer,\n\
-					@amount_spent_by_me:=amount_spent_by_me,@amount_spent_by_peer:=amount_spent_by_peer,\n\
-					@overpayment_from_peer:=overpayment_from_peer FROM channels WHERE aa_address=?",[objSignedMessage.channel]);
-				await	conn.query("SET @delta_amount_spent=GREATEST(@amount_spent - @amount_spent_by_peer,0)");
-				await	conn.query("SET @peer_credit=(@overpayment_from_peer + @delta_amount_spent)");
-				await	conn.query("SET @result = CASE \n\
-					WHEN @status != 'open' THEN 'channel not open'\n\
-					WHEN @period != @osmPeriod THEN 'wrong period'\n\
-					WHEN @payment_amount > @peer_credit THEN 'Payment amount is over your available credit'\n\
-					WHEN @lock = 0 THEN 'locked DB'\n\
-					ELSE NULL\n\
-					END");
-				await	conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+@delta_amount_spent,last_message_from_peer=?,overpayment_from_peer=(@peer_credit-@payment_amount)\n\
-					WHERE aa_address=? AND @result IS NULL",[JSON.stringify(objSignedPackage),objSignedMessage.channel]);
-				await	conn.query("DO RELEASE_LOCK(?)",[objSignedMessage.channel])
-				conn.query("SELECT @result AS error",function(result) {
-					conn.release();
-					if (result[0].error)
-						return handle({ error: error});
-					if (paymentReceivedCallback){
-						paymentReceivedCallback(payment_amount, objRequest.params.message, channel.aa_address, function(error, response){
-							if (error)
-								return handle({ error: error});
-							else
-								return handle({ response: response });
-						});
-					} else {
-						return handle({ response: "received payment for " + payment_amount });
-					}
-				});
-			});
-		}
-
-		async function treatPaymentWithSQLite() {
+		appDB.takeConnectionFromPool(async function(conn) {
 			mutex.lock([objSignedMessage.channel], async function(unlock){
 				async function unlockAndHandle(response){
+					if (conf.isHighAvailabilityNode){
+						await	conn.query("DO RELEASE_LOCK(?)",[objSignedMessage.channel]);
+					}
 					unlock();
 					handle(response);
 				}
 
+				if (conf.isHighAvailabilityNode){
+					const results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[objSignedMessage.channel]);
+					if (!results[0].my_lock || results[0].my_lock === 0)
+						return unlockAndHandle({ error: "internal error" });
+				}
+
 				if (objSignedMessage.channel){
-					var channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
+					var channels = await conn.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
 					if (channels.length === 0)
 						return unlockAndHandle({ error: "aa address not found" });
 				}
@@ -259,7 +226,7 @@ function treatPaymentFromPeer(objRequest, handle){
 				if (payment_amount > peer_credit)
 					return unlockAndHandle({ error: "Payment amount is over your available credit" });
 
-				await appDB.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?\n\
+				await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?\n\
 				WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
 				if (paymentReceivedCallback){
 					paymentReceivedCallback(payment_amount, objRequest.params.message, channel.aa_address, function(error, response){
@@ -272,7 +239,7 @@ function treatPaymentFromPeer(objRequest, handle){
 					return unlockAndHandle({ response: "received payment for " + payment_amount });
 				}
 			})
-		}
+		});
 	});
 }
 
