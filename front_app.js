@@ -114,33 +114,29 @@ async function treatIncomingRequest(objRequest, handle){
 	if (objRequest.command == 'create_channel'){
 		if (typeof objRequest.params != "object")
 			return handle({ error: "No params" });
-		if (objRequest.params.salt && !validationUtils.isNonemptyString(objRequest.params.salt))
-			return handle({ error: "Salt must be string" });
-		if (objRequest.params.salt && objRequest.params.salt.length > 50)
-			return handle({ error: "Salt must be 50 char max" });
-		if (!validationUtils.isPositiveInteger(objRequest.params.timeout))
-			return handle({ error: "Channel timeout must be positive integer" });
-		if (objRequest.params.timeout > conf.maxChannelTimeoutInSecond)
-			return handle({ error: `Channel timeout is too high, max acceptable: ${conf.maxChannelTimeoutInSecond} seconds`});
-		if (objRequest.params.timeout < conf.minChannelTimeoutInSecond)
-			return handle({ error: `Channel timeout is too low, min acceptable: ${conf.minChannelTimeoutInSecond} seconds`});
-		if (objRequest.params.aa_version > conf.aa_version)
-			return handle({ error: "Unsupported aa version" });
-		if (!validationUtils.isValidAddress(objRequest.params.address))
-			return handle({ error: "Invalid payment address" });
-		if (objRequest.params.address == my_address)
-			return handle({ error: "this address is not yours" });
-		if (objRequest.params.url && !isUrl(objRequest.params.url))
-			return handle({ error: "Invalid url" });
-		if (objRequest.params.asset != 'base' && !validationUtils.isValidBase64(objRequest.params.asset, 44))
-			return handle({ error: "Invalid asset" });
-		return createNewChannelOnPeerRequest(objRequest, handle);
+
+		saveChannelCreatedByPeer(objRequest.params, function(error, result){
+			if (error)
+				return handle({ error: error });
+			else
+				return handle({ response: result });
+		});
 	}
 
 	if (objRequest.command == 'pay'){
 		if (typeof objRequest.params != "object")
 			return handle({ error: "No params" });
-		return treatPaymentFromPeer(objRequest, handle);
+		if (typeof objRequest.params.signed_package != "object")
+			return handle({ error: "No signed_package" });
+
+		return treatPaymentFromPeer(objRequest.params.signed_package, function(error, result){
+			console.error(result);
+
+			if (error)
+				return handle({ error: error });
+			else
+				return handle({ response: result });
+		});
 	}
 
 	if (objRequest.command == 'is_open'){
@@ -159,106 +155,56 @@ async function treatIncomingRequest(objRequest, handle){
 }
 
 
-function treatPaymentFromPeer(objRequest, handle){
-	const objSignedPackage = objRequest.params.signed_package;
+function treatPaymentFromPeer(objSignedPackage, handle){
 
-	signedMessage.validateSignedMessage(objSignedPackage, async (error) => {
-		if (error){
-			console.log("error when validating message: " + error);
-			return handle({ error: error });
+	verifyPaymentPackage(objSignedPackage, function(error, payment_amount, aa_address){
+		if (paymentReceivedCallback){
+			paymentReceivedCallback(payment_amount, objRequest.params.message, aa_address, function(error, response){
+				if (error)
+					return handle(error);
+				else
+					return handle(null, response);
+			});
+		} else {
+			return handle(null, "received payment for " + payment_amount );
 		}
-		const objSignedMessage = objSignedPackage.signed_message;
-
-		if (typeof objSignedMessage != 'object')
-			return handle({ error: "signed message should be an object" });
-
-		if (objSignedMessage.channel && !validationUtils.isValidAddress(objSignedMessage.channel))
-			return handle({ error: "aa address is not valid" });
-
-		if (!validationUtils.isPositiveInteger(objSignedMessage.amount_spent))
-			return handle({ error: "amount_spent should be a positive integer" });
-		if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
-			return handle({ error: "payment_amount should be a positive integer" });
-
-		const channels = await appDB.query("SELECT peer_address FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
-
-		if (!channels[0])
-			return handle({ error: "unknown channel"});
-		if (!objSignedPackage.authors || !objSignedPackage.authors[0] || objSignedPackage.authors[0].address != channels[0].peer_address)
-			return handle({ error: "package signed by wrong address expected : " + channels[0].peer_address});
-
-		const payment_amount = objSignedMessage.payment_amount;
-
-		appDB.takeConnectionFromPool(async function(conn) {
-			mutex.lock([objSignedMessage.channel], async function(unlock){
-				async function unlockAndHandle(response){
-					if (conf.isHighAvailabilityNode){
-						await	conn.query("DO RELEASE_LOCK(?)",[objSignedMessage.channel]);
-					}
-					unlock();
-					handle(response);
-				}
-
-				if (conf.isHighAvailabilityNode){
-					const results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[objSignedMessage.channel]);
-					if (!results[0].my_lock || results[0].my_lock === 0)
-						return unlockAndHandle({ error: "internal error" });
-				}
-
-				if (objSignedMessage.channel){
-					var channels = await conn.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.channel]);
-					if (channels.length === 0)
-						return unlockAndHandle({ error: "aa address not found" });
-				}
-
-				const channel = channels[0];
-				if (channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
-					return unlockAndHandle({ error: "closing initiated by peer", error_code: "closing_initiated_by_peer" });
-				if (channel.status != 'open')
-					return unlockAndHandle({ error: "channel not open for peer", error_code: "not_open_for_peer" });
-				if (channel.period != objSignedMessage.period)
-					return unlockAndHandle({ error: "wrong period" });
-				if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
-					return unlockAndHandle({ error: "AA not funded enough" });
-
-				const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
-				const peer_credit = delta_amount_spent + channel.overpayment_from_peer;
-				if (payment_amount > peer_credit)
-					return unlockAndHandle({ error: "Payment amount is over your available credit" });
-
-				await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?\n\
-				WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
-				if (paymentReceivedCallback){
-					paymentReceivedCallback(payment_amount, objRequest.params.message, channel.aa_address, function(error, response){
-						if (error)
-							return unlockAndHandle({ error: error });
-						else
-							return unlockAndHandle({ response: response });
-					});
-				} else {
-					return unlockAndHandle({ response: "received payment for " + payment_amount });
-				}
-			})
-		});
 	});
 }
 
 
+function saveChannelCreatedByPeer(objParams, handle){
 
-function createNewChannelOnPeerRequest(objRequest, handle){
-	console.error(JSON.stringify(objRequest));
-	const objAAParameters = aaDefinitions.getAddressAndParametersForAA(my_address, objRequest.params.address, objRequest.params.timeout,objRequest.params.asset, objRequest.params.salt);
+if (objParams.salt && !validationUtils.isNonemptyString(objParams.salt))
+	return handle("Salt must be string");
+if (objParams.salt && objParams.salt.length > 50)
+	return handle("Salt must be 50 char max");
+if (!validationUtils.isPositiveInteger(objParams.timeout))
+	return handle("Channel timeout must be positive integer");
+if (objParams.timeout > conf.maxChannelTimeoutInSecond)
+	return handle(`Channel timeout is too high, max acceptable: ${conf.maxChannelTimeoutInSecond} seconds`);
+if (objParams.timeout < conf.minChannelTimeoutInSecond)
+	return handle(`Channel timeout is too low, min acceptable: ${conf.minChannelTimeoutInSecond} seconds`);
+if (objParams.aa_version > conf.aa_version)
+	return handle("Unsupported aa version");
+if (!validationUtils.isValidAddress(objParams.address))
+	return handle("Invalid payment address");
+if (objParams.address == my_address)
+	return handle("this address is not yours");
+if (objParams.url && !isUrl(objParams.url))
+	return handle("Invalid url");
+if (objParams.asset != 'base' && !validationUtils.isValidBase64(objParams.asset, 44))
+	return handle("Invalid asset");
+
+	const aa_address = aaDefinitions.getAaAddress(my_address, objParams.address,objParams.timeout ,objParams.asset, objParams.salt);
 	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url) VALUES (?,?,?,?,?,?,?)",
-		[objAAParameters.asset, objAAParameters.timeout, objAAParameters.aa_address, objRequest.params.salt, objRequest.params.address, objRequest.from_address, objRequest.url], function(result){
-
-			if (result.affectedRows !== 1)
-				return handle({ error: "this salt already exists" });
-			else {
-				eventBus.emit("channel_created_by_peer", objRequest.params.address, objAAParameters.aa_address);
-				return handle({ response: objAAParameters });
-			}
-
-		});
+	[objParams.asset, objParams.timeout, aa_address, objParams.salt, objParams.address, objRequest.from_address, objRequest.url], function(result){
+		if (result.affectedRows !== 1)
+			return handle("this salt already exists");
+		else {
+			eventBus.emit("channel_created_by_peer", objParams.address, aa_address);
+			return handle(null, aa_address);
+		}
+	});
 }
 
 
@@ -377,9 +323,9 @@ function createNewChannel(peer, initial_amount, options, handle){
 	if (options.auto_refill_amount && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
 		return handle("auto_refill_threshold must be positive integer");
 	if (validationUtils.isNonemptyString(options.salt) && options.salt.length > 50)
-		return handle({ error: "Salt must be 50 char max" });
+		return handle("Salt must be 50 char max");
 	if (!conf.giveAndExpectResponse && !validationUtils.isValidAddress(options.peer_address))
-		return handle({ error: "peer_address is not valid" });
+		return handle( "peer_address is not valid");
 
 	const asset = options.asset || 'base';
 
@@ -406,9 +352,10 @@ function createNewChannel(peer, initial_amount, options, handle){
 			return handle("couldn't pair with device");
 	} else if (isUrl(peer)){
 		peer_url = peer.substr(-1) == "/" ? peer : peer + "/";
-	}else {
-		return handle("not url nor pairing address provided");
+	} else if(conf.giveAndExpectResponse){
+		return handle("giveAndExpectResponse set to true but no peer specified");
 	}
+
 	if (conf.giveAndExpectResponse){ //if we expect response, channel is created after confirmation from peer
 		var responseCb = function(responseFromPeer){
 			treatResponseToChannelCreation(responseFromPeer, function(error, response){
@@ -418,9 +365,10 @@ function createNewChannel(peer, initial_amount, options, handle){
 			});
 		}
 	} else { //if no response expected, channel is created immediately
-		const objCalculatedAAParameters = aaDefinitions.getAddressAndParametersForAA(options.peer_address, my_address, options.timeout, asset, salt);
-		return createChannelAndSendDefinitionAndDeposit(initial_amount, objCalculatedAAParameters.arrDefinition, options.auto_refill_threshold, options.auto_refill_amount, asset, 
-		options.timeout, objCalculatedAAParameters.aa_address, salt, options.peer_address, correspondent_address || null, peer_url || null, handle);
+		const aa_address = aaDefinitions.getAaAddress(options.peer_address, my_address, options.timeout, asset, salt);
+		const arrAaDefinition = aaDefinitions.getAaArrDefinition(options.peer_address, my_address, options.timeout, asset, salt);
+		return createChannelAndSendDefinitionAndDeposit(initial_amount, arrAaDefinition, options.auto_refill_threshold, options.auto_refill_amount, asset, 
+		options.timeout, aa_address, salt, options.peer_address, correspondent_address || null, peer_url || null, handle);
 	}
 
 	const objToBeSent = {
@@ -454,10 +402,11 @@ function createNewChannel(peer, initial_amount, options, handle){
 			return handle({ error: "this address is not yours" });
 		if (my_address != response.address_b)
 			return handle('address b is not mine');
-		const objCalculatedAAParameters = aaDefinitions.getAddressAndParametersForAA(response.address_a, my_address, options.timeout, asset, salt);
-		if (objCalculatedAAParameters.aa_address !== response.aa_address)
+		const calculated_aa_address = aaDefinitions.getAaAddress(response.address_a, my_address, options.timeout, asset, salt);
+		if (calculated_aa_address !== response.aa_address)
 			return handle('peer calculated different aa address');
-		createChannelAndSendDefinitionAndDeposit(initial_amount, objCalculatedAAParameters.arrDefinition, options.auto_refill_threshold, options.auto_refill_amount, asset, 
+		const arrAaDefinition = aaDefinitions.getAaArrDefinition(response.address_a, my_address, options.timeout, asset, salt)
+		createChannelAndSendDefinitionAndDeposit(initial_amount, arrAaDefinition, options.auto_refill_threshold, options.auto_refill_amount, asset, 
 		options.timeout, response.aa_address, salt, response.address_a, correspondent_address || null, peer_url || null, handle);
 	}
 	
@@ -502,48 +451,10 @@ function askIfChannelOpen(comLayer, peer, aa_address){
 function sendMessageAndPay(aa_address, message, payment_amount, handle){
 	if (conf.isHighAvailabilityNode)
 		return handle("high availability node can only receive payment");
-	if (!my_address)
-		return handle("not initialized");
-	mutex.lock([aa_address], async function(unlock){
 
-		function unlockAndHandle(error, response){
-			unlock();
-			handle(error, response);
-		}
-		const channels = await appDB.query("SELECT status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,amount_spent_by_me FROM channels WHERE aa_address=?", [aa_address]);
-
-		if (channels.length === 0)
-			return unlockAndHandle("AA address not found");
-
-		const channel = channels[0];
-
-		if (channel.peer_device_address && conf.isHighAvailabilityNode)
-			return unlockAndHandle("device address cannot be used in high availability mode");
-
-		if (channel.status != "open" && channel.status != "open_confirmed_by_peer")
-			return unlockAndHandle("Channel is not open");
-
-		const myFreeAmountOnAA = channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
-
-		if (payment_amount > myFreeAmountOnAA)
-			return unlockAndHandle("AA not funded enough");
-
-		const comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
-		const peer = channel.peer_device_address || channel.peer_url;
-
-		if (channel.status != "open_confirmed_by_peer" && conf.giveAndExpectResponse){
-			if (await askIfChannelOpen(comLayer, peer, aa_address))
-				await appDB.query("UPDATE channels SET status='open_confirmed_by_peer' WHERE aa_address=?", [aa_address]);
-			else
-				return unlockAndHandle("Channel is not open for peer");
-		}
-
-		const objSignedPackage = await signMessage({ 
-			payment_amount: payment_amount, 
-			amount_spent: (payment_amount + channel.amount_spent_by_me), 
-			period: channel.period, 
-			channel: aa_address 
-		}, my_address);
+	getPaymentPackage(payment_amount, true, aa_address, function(error, objSignedPackage, peer, comLayer){
+		if (error)
+			return handle(error);
 
 		const objToBeSent = {
 			command: "pay",
@@ -554,25 +465,26 @@ function sendMessageAndPay(aa_address, message, payment_amount, handle){
 			}
 		}
 		const responseCb = async function(responseFromPeer){
+			if (typeof responseFromPeer != 'object')
+				return handle("wrong response from peer");
 			if (responseFromPeer.error){
 				await appDB.query("UPDATE channels SET amount_possibly_lost_by_me=amount_possibly_lost_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
 				if (responseFromPeer.error_code == "closing_initiated_by_peer")
 					await appDB.query("UPDATE channels SET status='closing_initiated_by_peer' WHERE aa_address=?", [aa_address]);
-				return unlockAndHandle(responseFromPeer.error);
+				return handle(responseFromPeer.error);
 			}
 			if (!responseFromPeer.response)
-				return unlockAndHandle('bad response from peer');
-			return unlockAndHandle(null, responseFromPeer.response);
+				return handle('bad response from peer');
+			return handle(null, responseFromPeer.response);
 		}
 
 		const timeOutCb = function(){
-			return unlockAndHandle('no response from peer');
+			return handle('no response from peer');
 		};
 
-		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
 		sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb);
-
-	});
+	})
+	
 }
 
 function signMessage(message, address){
@@ -691,6 +603,162 @@ async function getBalancesAndStatus(aa_address, handle){
 	else
 		return handle(null, rows[0]);
 
+}
+
+
+function getPaymentPackage(payment_amount, bReachablePeer, options, handle){
+
+	if (!my_address)
+		return handle("not initialized");
+
+	if (!validationUtils.isValidAddress(options)){
+		if (typeof options != 'object')
+			return handle("options should be an aa address or an object");
+		if (validationUtils.isNonemptyString(options.salt) && options.salt.length > 50)
+			return handle({ error: "Salt must be 50 char max" });
+		if (options.timeout && !validationUtils.isPositiveInteger(options.timeout))
+			return handle("timeout must be a positive integer");
+		if (options.asset && !validationUtils.isValidBase64(options.asset,44))
+			return handle("asset is not valid");
+		if (!validationUtils.isValidAddress(options.peer_address))
+			return handle("peer_address is not a valid address");
+		options.asset = options.asset || 'base';
+		var aa_address = aaDefinitions.getAaAddress(my_address, options.peer_address, options.timeout,options.asset, options.salt);
+
+	} else {
+		var aa_address = options;
+		options = null;
+	}
+
+	mutex.lock([aa_address], async function(unlock){
+
+		function unlockAndHandle(error, response, peer, comLayer){
+			unlock();
+			handle(error, response, peer, comLayer);
+		}
+
+		if (!my_address)
+		return unlockAndHandle("not initialized");
+
+		const channels = await appDB.query("SELECT status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,amount_spent_by_me FROM channels WHERE aa_address=?", [aa_address]);
+
+		if (channels.length === 0)
+			return unlockAndHandle("AA address not found");
+
+		const channel = channels[0];
+
+		if (channel.peer_device_address && conf.isHighAvailabilityNode)
+			return unlockAndHandle("device address cannot be used in high availability mode");
+
+		if (channel.status != "open" && channel.status != "open_confirmed_by_peer")
+			return unlockAndHandle("Channel is not open");
+
+		const myFreeAmountOnAA = channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
+
+		if (payment_amount > myFreeAmountOnAA)
+			return unlockAndHandle("AA not funded enough");
+
+		var peer, comLayer;
+		if(bReachablePeer){
+			peer = channel.peer_device_address || channel.peer_url;
+			if (peer){ // if we have a way to query the peer, we check that it sees channel open as well
+				comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
+
+				if (channel.status != "open_confirmed_by_peer" && conf.giveAndExpectResponse){
+					if (await askIfChannelOpen(comLayer, peer, aa_address))
+						await appDB.query("UPDATE channels SET status='open_confirmed_by_peer' WHERE aa_address=?", [aa_address]);
+					else
+						return unlockAndHandle("Channel is not open for peer");
+				}
+			} else{
+				return unlockAndHandle("no com layer for peer");
+			}
+		}
+		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
+
+		const objSignedPackage = await signMessage({ 
+			payment_amount: payment_amount, 
+			amount_spent: (payment_amount + channel.amount_spent_by_me), 
+			period: channel.period, 
+			aa_address: aa_address 
+		}, my_address);
+
+		unlockAndHandle(null, objSignedPackage, peer, comLayer);
+
+	});
+}
+
+function verifyPaymentPackage(objSignedPackage, handle){
+
+	signedMessage.validateSignedMessage(objSignedPackage, async (error) => {
+		if (error){
+			console.log("error when validating message: " + error);
+			return handle( error);
+		}
+		const objSignedMessage = objSignedPackage.signed_message;
+
+		if (typeof objSignedMessage != 'object')
+			return handle("signed message should be an object");
+
+		if (objSignedMessage.aa_address && !validationUtils.isValidAddress(objSignedMessage.aa_address))
+			return handle("aa address is not valid");
+
+		if (!validationUtils.isPositiveInteger(objSignedMessage.amount_spent))
+			return handle("amount_spent should be a positive integer");
+		if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
+			return handle("payment_amount should be a positive integer");
+
+		const channels = await appDB.query("SELECT peer_address FROM channels WHERE aa_address=?", [objSignedMessage.aa_address]);
+
+		if (!channels[0])
+			return handle( "unknown channel");
+
+		if (!objSignedPackage.authors || !objSignedPackage.authors[0] || objSignedPackage.authors[0].address != channels[0].peer_address)
+			return handle( "package signed by wrong address expected : " + channels[0].peer_address);
+
+		const payment_amount = objSignedMessage.payment_amount;
+
+		appDB.takeConnectionFromPool(async function(conn) {
+			mutex.lock([objSignedMessage.aa_address], async function(unlock){
+				async function unlockAndHandle(error, payment_amount, aa_address){
+					if (conf.isHighAvailabilityNode){
+						await	conn.query("DO RELEASE_LOCK(?)",[objSignedMessage.aa_address]);
+					}
+					unlock();
+					handle(error, payment_amount, aa_address);
+				}
+
+				if (conf.isHighAvailabilityNode){
+					const results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[objSignedMessage.aa_address]);
+					if (!results[0].my_lock || results[0].my_lock === 0)
+						return unlockAndHandle( "internal error");
+				}
+
+				const channels = await conn.query("SELECT * FROM channels WHERE aa_address=?", [objSignedMessage.aa_address]);
+				if (channels.length === 0)
+					return unlockAndHandle( "aa address not found");
+
+				const channel = channels[0];
+				if (channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
+					return unlockAndHandle( "closing initiated by peer");
+				if (channel.status != 'open')
+					return unlockAndHandle( "channel not open for peer");
+				if (channel.period != objSignedMessage.period)
+					return unlockAndHandle( "wrong period");
+				if (objSignedMessage.amount_spent > (channel.amount_deposited_by_peer + channel.amount_spent_by_me))
+					return unlockAndHandle( "AA not funded enough");
+
+				const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
+				const peer_credit = delta_amount_spent + channel.overpayment_from_peer;
+				if (payment_amount > peer_credit)
+					return unlockAndHandle( "Payment amount is over your available credit");
+
+				await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?\n\
+				WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
+					return unlockAndHandle(null, payment_amount, channel.aa_address);
+			});
+		});
+	});
 }
 
 
