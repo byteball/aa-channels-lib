@@ -84,11 +84,12 @@ channels.sendMessageAndPay(aa_address, message_to_peer, amount, function(error, 
 
 #### setCallBackForPaymentReceived
 ```javascript
-channels.setCallBackForPaymentReceived(function(amount, message_from_peer, aa_address, handle){
+channels.setCallBackForPaymentReceived(function(amount, asset, message_from_peer, aa_address, handle){
 		return handle(error, response);
 });
 ```
 - **amount**: amount received in bytes or assets
+- **asset**: asset unit for payment received in assets or 'base' for bytes
 - **message_to_peer**: string, object or number received from peer alongside with the payment.
 - **aa_address**: address of the channel that received payment
 - **error**: will be returned to peer if not null
@@ -119,7 +120,7 @@ After you authored the closing of a channel, you cannot send payment through it 
 #### getBalancesAndStatus
 ```javascript
 channels.getBalancesAndStatus(aa_address, function(response){
-	//{"status":"open","amount_deposited_by_me":366000,"amount_spent_by_me":0,"amount_spent_by_peer":0,"free_amount":366000,"pending_deposits":0}
+	//{"status":"open","amount_deposited_by_me":366000,"amount_spent_by_me":0,"amount_spent_by_peer":0,"free_amount":366000,"my_deposits":0}
 });
 ```
 - **aa_address**: address of the channel you want to get status and balances
@@ -129,7 +130,7 @@ channels.getBalancesAndStatus(aa_address, function(response){
   * amount_spent_by_me: total amount spent by you through channel
   * amount_spent_by_peer: total amount spent by peer through channel
   * free_amount: amount available for spending by you through channel
-  * pending_deposits: total amount you have deposited but it's not confirmed yet
+  * my_deposits: total amount you have deposited but it's not confirmed yet
 
 ## Events
 Require the Ocore event module where you need it in your project. 

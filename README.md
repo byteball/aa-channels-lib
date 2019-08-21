@@ -35,9 +35,9 @@ channels.sendMessageAndPay(aa_address, message_to_peer, amount, function(error, 
 
 You can set a function to be executed when you receive an offchain payment:
 ```javascript
-	channels.setCallBackForPaymentReceived(function(amount, message, peer_address, handle){
+	channels.setCallBackForPaymentReceived(function(amount, asset, message, peer_address, handle){
 		if (message == "thanks me")
-			return handle(null, "Thank you " + peer_address + " I received you payment of " + amount + " bytes");
+			return handle(null, "Thank you " + peer_address + " I received you payment of " + amount + " " + asset);
 		else if (message == "send me an error")
 			return handle("this is an error");
 	});

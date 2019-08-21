@@ -4,7 +4,6 @@ const db = require('ocore/db.js');
 
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	aa_address CHAR(32) NOT NULL PRIMARY KEY, \n\
-	version INTEGER DEFAULT 0,\n\
 	salt VARCHAR(50) DEFAULT NULL,\n\
 	definition TEXT,\n\
 	asset CHAR(44) DEFAULT NULL,\n\
@@ -12,6 +11,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	peer_device_address CHAR(33) DEFAULT NULL, \n\
 	peer_url VARCHAR(100) DEFAULT NULL,\n\
 	amount_spent_by_peer INTEGER DEFAULT 0,\n\
+	unconfirmed_amount_spent_by_peer INTEGER DEFAULT 0,\n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
@@ -24,6 +24,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	period INTEGER DEFAULT 1,\n\
 	last_message_from_peer TEXT,\n\
 	last_event_id INTEGER DEFAULT 0,\n\
+	is_definition_confirmed TINYINT DEFAULT 0,\n\
 	closing_authored TINYINT DEFAULT 0,\n\
 	status VARCHAR(30) DEFAULT 'created',\n\
 	last_updated_mci INTEGER DEFAULT 0,\n\
@@ -31,7 +32,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	UNIQUE (peer_address, salt)\n\
 );");
 
-db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\
+db.query("CREATE TABLE IF NOT EXISTS my_deposits (\n\
 	aa_address CHAR(32) NOT NULL, \n\
 	amount INTEGER NOT NULL,\n\
 	unit CHAR(44) NOT NULL,\n\
@@ -39,6 +40,17 @@ db.query("CREATE TABLE IF NOT EXISTS pending_deposits (\n\
 	UNIQUE (aa_address, unit)\n\
 );");
 
+db.query("CREATE TABLE IF NOT EXISTS unconfirmed_deposits_from_peer (\n\
+	aa_address CHAR(32) NOT NULL, \n\
+	amount INTEGER DEFAULT 0,\n\
+	unit CHAR(44) NOT NULL,\n\
+	close_channel TINYINT DEFAULT 0,\n\
+	has_definition TINYINT DEFAULT 0,\n\
+	is_bad_sequence TINYINT DEFAULT 0,\n\
+	UNIQUE(aa_address, unit)\n\
+)");
+
 db.query("CREATE TABLE IF NOT EXISTS channels_config (\n\
 	my_address CHAR(32) \n\
 	);");
+
