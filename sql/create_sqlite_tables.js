@@ -10,6 +10,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	peer_address CHAR(32) NOT NULL, \n\
 	peer_device_address CHAR(33) DEFAULT NULL, \n\
 	peer_url VARCHAR(100) DEFAULT NULL,\n\
+	is_known_by_peer TINYINT DEFAULT 0,\n\
 	amount_spent_by_peer INTEGER DEFAULT 0,\n\
 	unconfirmed_amount_spent_by_peer INTEGER DEFAULT 0,\n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\

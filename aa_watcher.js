@@ -10,6 +10,7 @@ const objectHash = require('ocore/object_hash.js');
 const async = require('async');
 const myWitnesses = require('ocore/my_witnesses.js');
 const light = require('ocore/light.js');
+const lightWallet = require('ocore/light_wallet.js');
 
 if (!conf.isHighAvailabilityNode){
 	require('./sql/create_sqlite_tables.js');
@@ -27,13 +28,13 @@ eventBus.once('headless_wallet_ready', function(){
 		my_address = _my_address;
 		await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
 		await treatUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
-		await treatNewUnitsFromPeers();
 		setInterval(lookForAndProcessTasks, 5000);
 	});
 });
 
 if (conf.bLight){
 	eventBus.on('my_transactions_became_stable', function(arrUnits){
+		console.error("my_transactions_became_stable " +JSON.stringify(arrUnits));
 		treatUnitsFromAA(arrUnits);
 	});
 } else {
@@ -45,6 +46,9 @@ if (conf.bLight){
 }
 
 eventBus.on('new_my_transactions', function(arrUnits){
+	console.error("new_my_transactions " +JSON.stringify(arrUnits));
+	if(conf.bLight && !lightWallet.isFirstHistoryReceived())
+		return console.error("first history not processed");
 	treatNewUnitsFromPeers(arrUnits);
 });
 
@@ -54,6 +58,8 @@ eventBus.on('sequence_became_bad', function(arrUnits){
 
 
 function lookForAndProcessTasks(){
+	if(conf.bLight && !lightWallet.isFirstHistoryReceived())
+		return console.log("first history not processed");
 	if (conf.bLight)
 		updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
@@ -66,7 +72,7 @@ async function updateAddressesToWatch(){
 	var rows = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses.map(function(row){ return row.address }).join("','") + "')");
 	rows.forEach(function(row){
 		if (conf.bLight){
-			myWitnesses.readMyWitnesses(function(witnesses){
+			myWitnesses.readMyWitnesses(async function(witnesses){
 				const objRequest = {addresses: [row.aa_address], witnesses: witnesses};
 				const network = require('ocore/network.js');
 				network.requestFromLightVendor('light/get_history', objRequest,  function(ws, request, response){
@@ -98,8 +104,8 @@ async function updateAddressesToWatch(){
 
 		async function treatUnitsAndAddWatchedAddress(){
 			await treatUnitsFromAA();
+			await treatNewUnitsFromPeers(null, row.aa_address);
 			console.error("treatUnitsFromAA done ");
-			await treatNewUnitsFromPeers();
 			console.error("treatNewUnitsFromPeers done ");
 			walletGeneral.addWatchedAddress(row.aa_address, () => {
 			});
@@ -123,14 +129,14 @@ async function getSqlFilterForNewUnitsFromChannels(){
 	});
 }
 
-async function getSqlFilterForNewUnitsFromPeers(){
+async function getSqlFilterForNewUnitsFromPeers(aa_address){
 	return new Promise(async (resolve, reject) => {
-		const rows = await appDB.query("SELECT last_updated_mci,peer_address FROM channels");
+		const rows = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
 		var string = rows.length > 0 ? " (" : " 0 ";
 		var i = 0;
 		rows.forEach(function(row){
 			i++;
-			string += " (author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
+			string += " (outputs.address='" + row.aa_address +"' AND author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
 			string += rows.length > i ? " OR " : "";
 		});
 		string += rows.length > 0 ? ") " : "";
@@ -138,62 +144,30 @@ async function getSqlFilterForNewUnitsFromPeers(){
 	});
 }
 
-function treatNewUnitsFromPeers(arrUnits){
+
+
+function treatNewUnitsFromPeers(arrUnits, aa_address){
 	return new Promise(async (resolve, reject_1) => {
-		mutex.lock(['treatNewUnitsFromPeers'], async (unlock) => {
+		mutex.lockOrSkip(['treatNewUnitsFromPeers'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 
 			const new_units = await dagDB.query("SELECT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
 			CROSS JOIN unit_authors USING(unit)\n\
-			WHERE "+ unitFilter + await getSqlFilterForNewUnitsFromPeers());
+			CROSS JOIN outputs USING(unit)\n\
+			WHERE "+ unitFilter + await getSqlFilterForNewUnitsFromPeers(aa_address));
 			if (new_units.length === 0){
 				unlock();
+				console.error("nothing concerns peers in these units");
 				console.log("nothing concerns peers in these units");
 				return resolve();
 			}
-
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
-				var channels = await appDB.query("SELECT * FROM channels WHERE peer_address=?", [new_unit.author_address]);
+				console.error("will treat "+ new_unit.author_address);
+				var channels = await appDB.query("SELECT aa_address FROM channels WHERE peer_address=?", [new_unit.author_address]);
 				if (!channels[0])
 					throw Error("channel not found");
-					channels.forEach(async function(channel){
-						var byteAmountRows = await dagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
-					if (!byteAmountRows[0] || byteAmountRows[0].amount < 10000)
-						return console.error("no deposit for this channel");
-					var sqlAsset = channel.asset == 'base' ? "" : " AND asset="+channel.asset +" ";
-					var amountRows = await dagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
-					var amount = amountRows[0].amount;
-
-					var bHasDefinition = false;
-					var bHasData = false;
-					console.error("will find " + new_unit.unit + " in cache");
-
-					if (assocJointsFromPeersCache[new_unit.unit]){
-						console.error(new_unit.unit + " found in cache");
-						assocJointsFromPeersCache[new_unit.unit].messages.forEach(function(message){
-							console.error(message.payload.address + " "+ channel.aa_address);
-							if (message.app == "definition" && message.payload.address == channel.aa_address){
-								bHasDefinition = true;
-								console.error("bHasDefinition true");
-							}
-							if (message.app == "data")
-								bHasData = true;
-						})
-					}
-
-					if (channel.status == "created" || channel.status == "close"){
-						var unconfirmedDepositRows = await appDB.query("SELECT close_channel,has_definition FROM unconfirmed_deposits_from_peer WHERE aa_address=?", [channel.aa_address]);
-						var bAlreadyHasDefinition = unconfirmedDepositRows.some(function(row){return row.has_definition});
-						var bAlreadyBeenClosed = unconfirmedDepositRows.some(function(row){return row.close_channel});
-					if (!bAlreadyBeenClosed && (bAlreadyHasDefinition || bHasDefinition)){
-						if (bHasData)
-							await appDB.query("INSERT INTO unconfirmed_deposits_from_peer (aa_address,close_channel,unit) VALUES (?,1,?)",[ channel.aa_address,new_unit.unit]);
-						else
-							await appDB.query("INSERT INTO unconfirmed_deposits_from_peer (aa_address,amount,unit,has_definition) VALUES (?,?,?,?)",[ channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0]);
-						}
-					}
-				});
+				await	treatNewUnitToChannel(channels, new_unit);
 			}
 			unlock();
 			resolve();
@@ -201,10 +175,117 @@ function treatNewUnitsFromPeers(arrUnits){
 	});
 }
 
+function treatNewUnitToChannel(channels, new_unit){
+	return new Promise(async (resolve, reject) => {
+		async.eachSeries(channels, function(channel, eachCb){
+			mutex.lock([channel.aa_address], async function(unlock_aa){
+				var conn = await takeAppDbConnectionAsync();
+				if (conf.isHighAvailabilityNode) {
+					var connOrDagDB = dagDB;
+					var results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
+					if (!results[0].my_lock || results[0].my_lock === 0){
+						 console.error("couldn't get lock from MySQL " + new_unit.author_address);
+						 conn.release();
+						 unlock_aa();
+						 eachCb();
+						return console.log("couldn't get lock from MySQL " + new_unit.author_address);
+					}
+				} else{
+					var connOrDagDB = conn;
+				}
+				var lockedChannelRows = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
+				var lockedChannel = lockedChannelRows[0];
+				var byteAmountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
+				console.error("byteAmountRows " + JSON.stringify(byteAmountRows));
+				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
+				if (byteAmount >= 10000){
+					console.error("received more than 10000 bytes")
+					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset="+channel.asset +" ";
+					var amountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
+					var amount = amountRows[0].amount;
+
+					var bHasDefinition = false;
+					var bHasData = false;
+					console.error("will find " + new_unit.unit + " in cache");
+
+					var joint = await getJointFromCacheStorageOrHub(connOrDagDB, new_unit.unit);
+					if (joint){
+						joint.messages.forEach(function(message){
+							console.error(message.payload.app + " "+ channel.aa_address);
+							if (message.app == "definition" && message.payload.address == channel.aa_address){
+								bHasDefinition = true;
+								console.error("bHasDefinition true");
+							}
+							if (message.app == "data")
+								bHasData = true;
+						});
+						console.error("lockedChannel.status " + lockedChannel.status);
+						console.error("lockedChannel.is_definition_confirmed " + lockedChannel.is_definition_confirmed);
+						if (lockedChannel.status == "created" || lockedChannel.status == "close"|| lockedChannel.status == "open"){
+							var unconfirmedDepositRows = await conn.query("SELECT close_channel,has_definition FROM unconfirmed_deposits_from_peer WHERE aa_address=?", [channel.aa_address]);
+							var bAlreadyBeenClosed = unconfirmedDepositRows.some(function(row){return row.close_channel});
+							console.error("bAlreadyBeenClosed " + bAlreadyBeenClosed);
+							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){
+								if (bHasData)
+									await conn.query("REPLACE INTO unconfirmed_deposits_from_peer (aa_address,close_channel,unit) VALUES (?,1,?)",[ channel.aa_address,new_unit.unit]);
+								else if (lockedChannel.asset != 'base' || byteAmount > 10000)
+									await conn.query("INSERT " + conn.getIgnore() + " INTO unconfirmed_deposits_from_peer (aa_address,amount,unit,has_definition) VALUES (?,?,?,?)",[ channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0]);
+							}
+						}
+					}
+				}
+				if (conf.isHighAvailabilityNode)
+					await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
+				conn.release();
+				unlock_aa();
+				eachCb();
+			});
+		}, function() {
+			resolve();
+		});
+	});
+}
+
+function getJointFromCacheStorageOrHub(conn, unit){
+	return new Promise(async (resolve, reject) => {
+		if (assocJointsFromPeersCache[unit])
+		 return resolve(assocJointsFromPeersCache[unit]);
+		 console.error("joint not in cache");
+		if (!conf.bLight){
+			return require('ocore/storage.js').readJoint(conn, unit, {
+				ifFound: function(objJoint){
+					console.error("joint read in storage");
+					return resolve(objJoint.unit);
+				},
+				ifNotFound: function(){
+					return resolve();
+				}
+			});
+		}
+		const network = require('ocore/network.js');
+		network.requestFromLightVendor('get_joint', unit,  function(ws, request, response){
+			if (response.joint){
+				console.error("joint received from hub");
+				resolve(response.joint.unit)
+			} else {
+				resolve();
+			}
+		});
+		setTimeout(resolve, 1000);
+	});
+}
+
+function takeAppDbConnectionAsync(){
+	return new Promise(async (resolve, reject) => {
+		appDB.takeConnectionFromPool(function(conn) {
+			resolve(conn);
+		});
+	});
+}
 
 function treatUnitsFromAA(arrUnits){
 	return new Promise(async (resolve_1, reject_1) => {
-		mutex.lock(['treatUnitsFromAA'], async (unlock) => {
+		mutex.lockOrSkip(['treatUnitsFromAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			const isStableFilter = conf.bLight ? " AND is_stable=1 AND sequence='good' " : "";
 
@@ -221,102 +302,126 @@ function treatUnitsFromAA(arrUnits){
 
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
-				console.error("new_unit "  +new_unit.unit);
-				var channels = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
-				if (!channels[0])
-					throw Error("channel not found");
-
-				var payloads = await dagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
-
-				var channel = channels[0];
-				var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
-
-				async function setLastUpdatedMciAndEventIdAndOtherFields(fields){
-					return new Promise(async (resolve_2, reject_2) => {
-						var strSetFields = "";
-						if (fields)
-							for (var key in fields){
-								strSetFields += "," + key + "='" + fields[key] + "'";
-							}
-
-						if (conf.isHighAvailabilityNode) {
-							appDB.takeConnectionFromPool(async function(conn) {
-								var results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
-								if (!results[0].my_lock || results[0].my_lock === 0)
-									return console.log("couldn't get lock from MySQL");
-								await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
-								await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
-								return resolve_2();
-							})
-						} else {
-							await appDB.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
-							return resolve_2();
-						}
-					});
-				}
-
-				if (payload && payload.trigger_unit){
-					await appDB.query("DELETE FROM unconfirmed_deposits_from_peer WHERE unit=?", [payload.trigger_unit]);
-					delete assocJointsFromPeersCache[payload.trigger_unit];
-				}
-				//channel is open and received funding
-				if (payload && payload.open){
-					await appDB.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
-					await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
-					if (payload[my_address] > 0)
-						eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
-					else
-						eventBus.emit("peer_deposit_became_stable", payload[channel.peer_address], payload.trigger_unit);
-				}
-
-				//closing requested by one party
-				if (payload && payload.closing){
-					if (payload.initiated_by === my_address)
-						var status = "closing_initiated_by_me_acknowledged";
-					else {
-						var status = "closing_initiated_by_peer";
-						if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
-							confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
-						} else {
-							await confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
-						}
-					}
-					await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
-				}
-				//AA confirms that channel is closed
-				if (payload && payload.closed){
-					await setLastUpdatedMciAndEventIdAndOtherFields(
-						{
-							status: "closed",
-							period: payload.period,
-							amount_spent_by_peer: 0,
-							amount_spent_by_me: 0,
-							amount_deposited_by_peer: 0,
-							amount_deposited_by_me: 0,
-							overpayment_from_peer: 0,
-							amount_possibly_lost_by_me: 0,
-							last_message_from_peer: ''
-						});
-					const rows = await dagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
-					if (payload.fraud_proof)
-						eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
-					else
-						eventBus.emit("channel_closed", new_unit.author_address, rows[0] ? rows[0].amount : 0);
-				}
-
-				if (payload && payload.refused){
-					const result = await appDB.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
-					if (result.affectedRows !== 0)
-						eventBus.emit("refused_deposit", payload.trigger_unit);
-					await setLastUpdatedMciAndEventIdAndOtherFields({});
-				}
+				await treatUnitFromAA(new_unit);
 			}
 			unlock();
 			resolve_1();
 		});
-	})
+	});
 }
 
+
+function treatUnitFromAA(new_unit){
+	return new Promise(async (resolve, reject) => {
+		mutex.lock([new_unit.author_address], async function(unlock_aa){
+			console.error("will take conn");
+			var conn = await takeAppDbConnectionAsync();
+			console.error("conn taken");
+			if (conf.isHighAvailabilityNode) {
+				var connOrDagDB = dagDB;
+
+				var results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
+				if (!results[0].my_lock || results[0].my_lock === 0){
+					unlock_aa();
+					conn.release();
+					console.error("couldn't get lock from MySQL for " + new_unit.author_address);
+					console.log("couldn't get lock from MySQL");
+					return resolve();
+				}
+			} else{
+				var connOrDagDB = conn;
+			}
+			console.error("will query channels");
+			var channels = await conn.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
+			console.log("channels " + JSON.stringify(channels));
+
+			if (!channels[0])
+				throw Error("channel not found");
+				console.error("will query payloads");
+				var payloads = await connOrDagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
+
+			console.log("payloads " + JSON.stringify(payloads));
+
+			var channel = channels[0];
+			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
+			console.log("channel " + JSON.stringify(channel));
+
+			function setLastUpdatedMciAndEventIdAndOtherFields(fields){
+				return new Promise(async (resolve_2, reject_2) => {
+					console.error("will update fields " + JSON.stringify(fields));
+					var strSetFields = "";
+					if (fields)
+						for (var key in fields){
+							strSetFields += "," + key + "='" + fields[key] + "'";
+						}
+					await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
+					return resolve_2();
+				});
+			}
+			console.log("payload " + JSON.stringify(payload));
+			if (payload && payload.trigger_unit){
+				await conn.query("DELETE FROM unconfirmed_deposits_from_peer WHERE unit=?", [payload.trigger_unit]);
+				delete assocJointsFromPeersCache[payload.trigger_unit];
+			}
+			//channel is open and received funding
+			if (payload && payload.open){
+				await conn.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
+				await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
+				if (payload[my_address] > 0)
+					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
+				else
+					eventBus.emit("peer_deposit_became_stable", payload[channel.peer_address], payload.trigger_unit);
+			}
+
+			//closing requested by one party
+			if (payload && payload.closing){
+				if (payload.initiated_by === my_address)
+					var status = "closing_initiated_by_me_acknowledged";
+				else {
+					var status = "closing_initiated_by_peer";
+					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
+						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
+					} else {
+						await confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+					}
+				}
+				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
+			}
+			//AA confirms that channel is closed
+			if (payload && payload.closed){
+				await setLastUpdatedMciAndEventIdAndOtherFields(
+					{
+						status: "closed",
+						period: payload.period,
+						amount_spent_by_peer: 0,
+						amount_spent_by_me: 0,
+						amount_deposited_by_peer: 0,
+						amount_deposited_by_me: 0,
+						overpayment_from_peer: 0,
+						amount_possibly_lost_by_me: 0,
+						last_message_from_peer: ''
+					});
+				const rows = await dagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
+				if (payload.fraud_proof)
+					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
+				else
+					eventBus.emit("channel_closed", new_unit.author_address, rows[0] ? rows[0].amount : 0);
+			}
+
+			if (payload && payload.refused){
+				const result = await appDB.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
+				if (result.affectedRows !== 0)
+					eventBus.emit("refused_deposit", payload.trigger_unit);
+				await setLastUpdatedMciAndEventIdAndOtherFields({});
+			}
+			if (conf.isHighAvailabilityNode)
+				await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
+			conn.release();
+			unlock_aa();
+			resolve();
+		});
+	});
+}
 
 function treatClosingRequests(){
 	mutex.lock(['treatClosingRequests'], async function(unlock){

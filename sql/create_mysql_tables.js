@@ -48,5 +48,6 @@ db.query("CREATE TABLE IF NOT EXISTS unconfirmed_deposits_from_peer (\n\
 	close_channel TINYINT DEFAULT 0,\n\
 	has_definition TINYINT DEFAULT 0,\n\
 	is_bad_sequence TINYINT DEFAULT 0,\n\
+	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE KEY peerDepositsbyChannelAndUnit(aa_address, unit)\n\
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;");

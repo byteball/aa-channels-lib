@@ -268,9 +268,9 @@ function deposit(aa_address, amount, handle){
 		}
 
 		const channel = channels[0];
-		if (channel.asset == "base" && amount < 1e5){
+		if (channel.asset == "base" && amount <= 1e4){
 			unlock();
-			return handle("amount must be >= 1e5");
+			return handle("amount must be > 1e4");
 		}
 		if (channel.status != "open" && channel.status != "open_confirmed_by_peer" && channel.status != "closed" && channel.status != "created"){
 			unlock();
@@ -362,6 +362,9 @@ function createNewChannel(peer, initial_amount, options, handle){
 				return handle(null, response);
 			});
 		}
+		var timeOutCb = function(){
+			return handle('no response from peer');
+		};
 	} else { //if no response expected, channel is created immediately
 		const aa_address = aaDefinitions.getAaAddress(options.peer_address, my_address, options.timeout, asset, salt);
 		const arrAaDefinition = aaDefinitions.getAaArrDefinition(options.peer_address, my_address, options.timeout, asset, salt);
@@ -382,9 +385,9 @@ function createNewChannel(peer, initial_amount, options, handle){
 		objToBeSent.params.salt = salt;
 		
 	if (correspondent_address)
-		sendRequestToPeer("obyte-messenger", correspondent_address, objToBeSent, responseCb);
+		sendRequestToPeer("obyte-messenger", correspondent_address, objToBeSent, responseCb, timeOutCb);
 	else if (peer_url)
-		sendRequestToPeer("http", peer, objToBeSent, responseCb);
+		sendRequestToPeer("http", peer, objToBeSent, responseCb, timeOutCb);
 	else
 		throw Error("no correspondent_address nor peer_url");
 
@@ -629,10 +632,12 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		if (channel.peer_device_address && conf.isHighAvailabilityNode)
 			return unlockAndHandle("device address cannot be used in high availability mode");
 
-		if (channel.status != "open" && channel.status != "open_confirmed_by_peer")
-			return unlockAndHandle("Channel is not open");
+		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
+			return unlockAndHandle( "closing initiated");
 
-		const myFreeAmountOnAA = channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
+		const my_pending_deposits_rows = await appDB.query("SELECT SUM(amount) as total_amount FROM my_deposits WHERE aa_address=? AND is_confirmed_by_aa=0",[aa_address]);
+		const my_pending_deposits = my_pending_deposits_rows[0] ? my_pending_deposits_rows[0].total_amount : 0;
+		const myFreeAmountOnAA = my_pending_deposits + channel.amount_deposited_by_me - channel.amount_spent_by_me + channel.amount_spent_by_peer;
 
 		if (payment_amount > myFreeAmountOnAA)
 			return unlockAndHandle("AA not funded enough");
@@ -643,12 +648,12 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		if (peer){ // if we have a way to query the peer, we check that it sees channel open as well
 			comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
 
-			if (channel.status != "open_confirmed_by_peer" && conf.giveAndExpectResponse){
+		/*	if (channel.status != "open_confirmed_by_peer" && conf.giveAndExpectResponse){
 				if (await askIfChannelOpen(comLayer, peer, aa_address))
 					await appDB.query("UPDATE channels SET status='open_confirmed_by_peer',is_known_by_peer=1 WHERE aa_address=?", [aa_address]);
 				else
 					return unlockAndHandle("Channel is not open for peer");
-			}
+			}*/
 		} else{
 			return unlockAndHandle("no com layer for peer");
 		}
@@ -732,12 +737,12 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					return unlockAndHandle( "aa address not found");
 
 				const channel = channels[0];
-				if (channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
-					return unlockAndHandle( "closing initiated by peer");
+				if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
+					return unlockAndHandle( "closing initiated");
 				var amount_deposited_by_peer = channel.amount_deposited_by_peer;
 				if (channel.status != 'open' && channel.status != 'closing_initiated_by_peer'){
 
-					const unconfirmedDepositsRows =	await conn.query("SELECT SUM(amount) AS total_amount, * FROM unconfirmed_deposits_from_peer WHERE aa_address=?",[objSignedMessage.aa_address]);
+					const unconfirmedDepositsRows =	await conn.query("SELECT SUM(amount) AS total_amount,close_channel,has_definition,is_bad_sequence FROM unconfirmed_deposits_from_peer WHERE aa_address=?",[objSignedMessage.aa_address]);
 					const bHasBeenClosed = unconfirmedDepositsRows.some(function(row){return row.close_channel === 1});
 					const	bHasDefinition = unconfirmedDepositsRows.some(function(row){return row.has_definition === 1}) || channel.is_definition_confirmed === 1;
 					const bHasBadSequence = unconfirmedDepositsRows.some(function(row){return row.is_bad_sequence ===1});
@@ -769,8 +774,35 @@ function verifyPaymentPackage(objSignedPackage, handle){
 		});
 	});
 }
+function test(to){
+	var composer = require('ocore/composer.js');
+	var network = require('ocore/network.js');
+	var callbacks = composer.getSavingCallbacks({
+		ifNotEnoughFunds: ()=>{},
+		ifError: ()=>{},
+		ifOk: function(objJoint){
+			network.broadcastJoint(objJoint);
+		}
+	});
+	var payload = {
+		close : 1
+	}
+	var objMessage = {
+		app: "data",
+		payload_location: "inline",
+		payload_hash: objectHash.getBase64Hash(payload, true),
+		payload: payload
+	};
+	composer.composeJoint({
+		paying_addresses: [my_address], 
+		outputs: [{address: to, amount: 50000},{address: my_address, amount: 0}], 
+		messages: [objMessage], 
+		signer: headlessWallet.signer, 
+		callbacks: callbacks
+	});
 
-
+}
+exports.test = test;
 exports.setAutoRefill = setAutoRefill;
 exports.createNewChannel = createNewChannel;
 exports.deposit = deposit;
