@@ -14,6 +14,14 @@ exports.defaultTimeoutInSecond = 600;
 
 exports.isHighAvailabilityNode =  false;
 
+exports.unconfirmedAmountsLimitsByAssetOrChannel = {
+	"base" : {
+		max_unconfirmed_by_asset : 100000,
+		max_unconfirmed_by_channel : 10000,
+		minimum_time_in_second : 1
+	}
+}
+
 exports.enabledReceivers = ['http','obyte-messenger']; //configure the communication layers that can receive a message from peer
 // if 'http' is present, a http server will start to listen at port httpDefaultPort
 // if 'obyte-messenger' is present, messages incoming through the encypted chat layers will be treated (not possible in High availability mode)

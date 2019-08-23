@@ -12,7 +12,6 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	peer_url VARCHAR(100) DEFAULT NULL,\n\
 	is_known_by_peer TINYINT DEFAULT 0,\n\
 	amount_spent_by_peer INTEGER DEFAULT 0,\n\
-	unconfirmed_amount_spent_by_peer INTEGER DEFAULT 0,\n\
 	amount_spent_by_me INTEGER DEFAULT 0,\n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
@@ -41,13 +40,14 @@ db.query("CREATE TABLE IF NOT EXISTS my_deposits (\n\
 	UNIQUE (aa_address, unit)\n\
 );");
 
-db.query("CREATE TABLE IF NOT EXISTS unconfirmed_deposits_from_peer (\n\
+db.query("CREATE TABLE IF NOT EXISTS unconfirmed_units_from_peer (\n\
 	aa_address CHAR(32) NOT NULL, \n\
 	amount INTEGER DEFAULT 0,\n\
 	unit CHAR(44) NOT NULL,\n\
 	close_channel TINYINT DEFAULT 0,\n\
 	has_definition TINYINT DEFAULT 0,\n\
 	is_bad_sequence TINYINT DEFAULT 0,\n\
+	timestamp INTEGER NOT NULL,\n\
 	UNIQUE(aa_address, unit)\n\
 )");
 

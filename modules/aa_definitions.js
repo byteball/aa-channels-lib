@@ -114,7 +114,8 @@ return 	['autonomous agent', {
 								initiated_by: "{trigger.address}",
 								"{$addressA}": "{ $bFromA ? $transferredFromMe : $transferredFromPeer}",
 								"{$addressB}": "{ $bFromB ? $transferredFromMe : $transferredFromPeer}",
-								event_id :"{var['event_id'] otherwise 1}"
+								event_id :"{var['event_id'] otherwise 1}",
+								trigger_unit: "{trigger.unit}"
 							}
 						},
 						{
@@ -124,8 +125,6 @@ return 	['autonomous agent', {
 							var['spentByB'] = $bFromB ? $transferredFromMe : $transferredFromPeer;
 							$finalBalanceA = var['balanceA'] - var['spentByA'] + var['spentByB'];
 							$finalBalanceB = var['balanceB'] - var['spentByB'] + var['spentByA'];
-							if ($finalBalanceA < 0 OR $finalBalanceB < 0)
-								bounce('one of the balances would become negative');
 							var['close_initiated_by'] = $party;
 							var['close_start_ts'] = timestamp;
 							if (!var['event_id'])
@@ -146,10 +145,10 @@ return 	['autonomous agent', {
 					$additionnalTransferredFromMe = trigger.data.additionnalTransferredFromMe otherwise 0;
 					$additionalSpentByA = $party == 'A' ? $additionnalTransferredFromMe : 0;
 					$additionalSpentByB = $party == 'B' ? $additionnalTransferredFromMe : 0;
-					$finalBalanceA = var['balanceA'] - var['spentByA'] + var['spentByB'] + $additionalSpentByB - $additionalSpentByA;
-					$finalBalanceB = var['balanceB'] - var['spentByB'] + var['spentByA'] + $additionalSpentByA - $additionalSpentByB;
-					if ($finalBalanceA < 0 OR $finalBalanceB < 0)
-						bounce('one of the balances would become negative');
+					$balanceA = var['balanceA'] - var['spentByA'] + var['spentByB'] + $additionalSpentByB - $additionalSpentByA;
+					$balanceB = var['balanceB'] - var['spentByB'] + var['spentByA'] + $additionalSpentByA - $additionalSpentByB;
+					$finalBalanceA = $balanceA > 0 ? $balanceA : 0; // balance could be zero if an unconfirmed deposit were lost 
+					$finalBalanceB = $balanceB > 0 ? $balanceB : 0;
 				}`,
 				messages: [
 					{
