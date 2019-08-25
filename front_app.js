@@ -169,14 +169,14 @@ async function treatIncomingRequest(objRequest, handle){
 async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
 	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel || !conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset])
-		return handle(null, 0);
+		return handle(null, 0); // unconfirmed channel not allowed
 
 	const maxValidTimestamp = Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second;
-	const unconfirmedDepositsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
+	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
-	const bHasBeenClosed = unconfirmedDepositsRows.some(function(row){return row.close_channel === 1});
-	const	bHasDefinition = unconfirmedDepositsRows.some(function(row){return row.timestamp < maxValidTimestamp && row.has_definition === 1}) || objChannel.is_definition_confirmed === 1;
-	const bHasBadSequence = unconfirmedDepositsRows.some(function(row){return row.is_bad_sequence ===1});
+	const bHasBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel === 1});
+	const	bHasDefinition = unconfirmedUnitsRows.some(function(row){return row.timestamp < maxValidTimestamp && row.has_definition === 1}) || objChannel.is_definition_confirmed === 1;
+	const bHasBadSequence = unconfirmedUnitsRows.some(function(row){return row.is_bad_sequence ===1});
 
 	if (bHasBeenClosed)
 		return handle( "channel in unconfirmed closing state");
@@ -186,7 +186,7 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 		return handle( "bad sequence unit from peer");
 
 	var unconfirmedDeposit = 0;
-	unconfirmedDepositsRows.forEach(function(row){
+	unconfirmedUnitsRows.forEach(function(row){
 		if (row.timestamp < maxValidTimestamp)
 			unconfirmedDeposit += row.amount;
 	})
@@ -199,7 +199,7 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 
 	const unconfirmedSpendableByAsset = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_asset - unconfirmedSpentByAsset, 0);
 	const unconfirmedSpendableByChannel = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_channel - unconfirmedSpentByChannel, 0);
-
+	console.error("unconfirmedDeposit " + unconfirmedDeposit);
 	return handle(null, Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit));
 }
 
@@ -477,7 +477,7 @@ async function createChannelAndSendDefinitionAndDeposit(initial_amount, arrDefin
 }
 
 function askIfChannelReady(comLayer, peer, aa_address){
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve) => {
 		const objToBeSent = {
 			command: "is_ready",
 			timestamp: Date.now(),

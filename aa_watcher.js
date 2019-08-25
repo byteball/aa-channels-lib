@@ -11,6 +11,7 @@ const async = require('async');
 const myWitnesses = require('ocore/my_witnesses.js');
 const light = require('ocore/light.js');
 const lightWallet = require('ocore/light_wallet.js');
+const constants = require('ocore/constants.js');
 
 if (!conf.isHighAvailabilityNode){
 	require('./sql/create_sqlite_tables.js');
@@ -66,8 +67,8 @@ function lookForAndProcessTasks(){ // main loop for repetitive tasks
 }
 
 async function updateAddressesToWatch(){
-	var watched_addresses = await dagDB.query("SELECT address FROM my_watched_addresses");
-	var rows = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses.map(function(row){ return row.address }).join("','") + "')");
+	var watched_addresses = (await dagDB.query("SELECT address FROM my_watched_addresses")).map(function(row){ return row.address }).join("','");
+	var rows = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses + "')");
 	rows.forEach(function(row){
 		if (conf.bLight){
 			myWitnesses.readMyWitnesses(async function(witnesses){
@@ -110,31 +111,25 @@ async function updateAddressesToWatch(){
 
 
 async function getSqlFilterForNewUnitsFromChannels(){
-	return new Promise(async (resolve, reject) => {
+	return new Promise(async (resolve) => {
 		const rows = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
-		var string = rows.length > 0 ? " (" : " 0 ";
-		var i = 0;
-		rows.forEach(function(row){
-			i++;
-			string += " (author_address='" + row.aa_address + "' AND main_chain_index>" + row.last_updated_mci + ") ";
-			string += rows.length > i ? " OR " : "";
-		});
-		string += rows.length > 0 ? ") " : "";
+		if (rows.length === 0)
+			return resolve(" 0 ");
+		var string = rows.map(function(row){
+			return " (author_address='" + row.aa_address + "' AND main_chain_index>" + row.last_updated_mci + ") ";
+		}).join(' OR ');
 		resolve(string);
 	});
 }
 
 async function getSqlFilterForNewUnitsFromPeers(aa_address){
-	return new Promise(async (resolve, reject) => {
+	return new Promise(async (resolve) => {
 		const rows = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
-		var string = rows.length > 0 ? " (" : " 0 ";
-		var i = 0;
-		rows.forEach(function(row){
-			i++;
-			string += " (outputs.address='" + row.aa_address +"' AND author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
-			string += rows.length > i ? " OR " : "";
-		});
-		string += rows.length > 0 ? ") " : "";
+		if (rows.length === 0)
+			return resolve(" 0 ");
+		var string = rows.map(function(row){
+			return " (outputs.address='" + row.aa_address +"' AND author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
+		}).join(' OR ');
 		resolve(string);
 	});
 }
@@ -188,8 +183,8 @@ function treatNewOutputsToChannels(channels, new_unit){
 				var lockedChannel = lockedChannelRows[0];
 				var byteAmountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
-				if (byteAmount >= 10000){ // 10000 is the minimum to not be bounced
-					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset="+channel.asset +" ";
+				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // 10000 is the minimum to not be bounced
+					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset="+lockedChannel.asset +" ";
 					var amountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
@@ -207,8 +202,8 @@ function treatNewOutputsToChannels(channels, new_unit){
 						});
 						// for this 3 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
 						if (lockedChannel.status == "created" || lockedChannel.status == "closed"|| lockedChannel.status == "open"){
-							var unconfirmedDepositRows = await conn.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
-							var bAlreadyBeenClosed = unconfirmedDepositRows.some(function(row){return row.close_channel});
+							var unconfirmedUnitsRows = await conn.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
+							var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
 							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){ // we ignore unit if a closing request happened or no pending/confirmed definition is known
 								var timestamp = Math.round(Date.now() / 1000);
 								if (bHasData) // a deposit shouldn't have data, if it has data we consider it's a closing request and we flag it as so

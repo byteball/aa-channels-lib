@@ -1,5 +1,5 @@
 const objectHash = require('ocore/object_hash.js');
-const conf = require('ocore/conf.js');
+const constants = require('ocore/constants.js');
 
 
 function getAaAddress(addressA, addressB, timeout, asset, salt){
@@ -24,7 +24,7 @@ return 	['autonomous agent', {
 	messages: {
 		cases: [
 			{ // one party fills or refills the AA
-				if: `{ $bFromParties AND ($asset!='base' AND trigger.output[[asset=$asset]] > 0 OR $asset=='base' AND trigger.output[[asset=base]] > 10000)}`,
+				if: `{ $bFromParties AND ($asset!='base' AND trigger.output[[asset=$asset]] > 0 OR $asset=='base' AND trigger.output[[asset=base]] > ${constants.MIN_BYTES_BOUNCE_FEE})}`,
 				init: `{
 					if (var['close_initiated_by']){
 						$refused=1;
