@@ -81,10 +81,6 @@ async function updateAddressesToWatch(){
 						response.joints.forEach(function(objUnit){
 							assocJointsFromPeersCache[objUnit.unit.unit] = objUnit.unit;
 						})
-					if (response.unstable_mc_joints)
-						response.unstable_mc_joints.forEach(function(objUnit){
-							assocJointsFromPeersCache[objUnit.unit.unit] = objUnit.unit;
-						})
 					light.processHistory(response, objRequest.witnesses, {
 						ifError: function(err){
 							console.log("error when processing history for " + row.aa_address +" "+ err);
@@ -140,7 +136,7 @@ function treatNewUnitsToAA(arrUnits, aa_address){
 		mutex.lockOrSkip(['treatNewUnitsToAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			// we select units having output address and author matching known channels
-			const new_units = await dagDB.query("SELECT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
+			const new_units = await dagDB.query("SELECT DISTINCT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
 			CROSS JOIN unit_authors USING(unit)\n\
 			CROSS JOIN outputs USING(unit)\n\
 			WHERE "+ unitFilter + await getSqlFilterForNewUnitsFromPeers(aa_address));
@@ -181,11 +177,11 @@ function treatNewOutputsToChannels(channels, new_unit){
 				}
 				var lockedChannelRows = await connOrDagDB.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
 				var lockedChannel = lockedChannelRows[0];
-				var byteAmountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
+				var byteAmountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
-				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // 10000 is the minimum to not be bounced
+				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
 					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset="+lockedChannel.asset +" ";
-					var amountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
+					var amountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
 					var bHasDefinition = false;
@@ -207,10 +203,10 @@ function treatNewOutputsToChannels(channels, new_unit){
 							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){ // we ignore unit if a closing request happened or no pending/confirmed definition is known
 								var timestamp = Math.round(Date.now() / 1000);
 								if (bHasData) // a deposit shouldn't have data, if it has data we consider it's a closing request and we flag it as so
-									await conn.query("REPLACE INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
+									await conn.query("INSERT  " + conn.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
 									[ channel.aa_address,new_unit.unit, timestamp]);
 								else if (lockedChannel.asset != 'base' || byteAmount > 10000) // deposit in bytes are possible only over 10000
-									await conn.query("INSERT " + conn.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
+									await conn.query("INSERT  " + conn.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
 									[ channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
 							}
 						}
