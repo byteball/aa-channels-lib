@@ -3,7 +3,7 @@
 
 const db = require('ocore/db');
 
-exports.addCorrespondent = (code, name, cb) => {
+function addCorrespondent(code, name, cb) {
 	let device = require('ocore/device');
 
 	function handleCode(code) {
@@ -40,13 +40,7 @@ exports.addCorrespondent = (code, name, cb) => {
 	handleCode(code);
 };
 
-exports.findCorrespondentsByName = (name, cb) => {
-	db.query("SELECT * FROM correspondent_devices WHERE name = ?", [name], (rows) => {
-		return cb(rows);
-	});
-};
-
-exports.findCorrespondentByPairingCode = (code, cb) => {
+function findCorrespondentByPairingCode(code, cb) {
 	let matches = code.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
 	if (!matches)
 		return cb("Invalid pairing code");
@@ -58,16 +52,20 @@ exports.findCorrespondentByPairingCode = (code, cb) => {
 	});
 };
 
-exports.findOrAddCorrespondentByPairingCode = (code, cb) => {
-	correspondents.findCorrespondentByPairingCode(code, (correspondent) => {
-		if (!correspondent){
-			correspondents.addCorrespondent(peer, 'Payment channel peer', (err, device_address) => {
-				if (err)
-					return cb(err);
-					cb(null, device_address);
-			});
-		} else {
-			cb(null, correspondent.device_address);
-		}
+exports.findOrAddCorrespondentByPairingCode = (code) => {
+	return new Promise((resolve) => {
+		findCorrespondentByPairingCode(code, (correspondent) => {
+			if (!correspondent){
+				addCorrespondent(code, 'Payment channel peer', (err, device_address) => {
+					if (err){
+						console.log("error when adding correspondent "+ err);
+						return resolve(null);
+					}
+					resolve(device_address);
+				});
+			} else {
+				resolve(correspondent.device_address);
+			}
+		});
 	});
 }

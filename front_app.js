@@ -349,7 +349,7 @@ function deposit(aa_address, amount, handle){
 	});
 }
 
-function createNewChannel(peer, initial_amount, options, handle){
+async function createNewChannel(peer, initial_amount, options, handle){
 	options = options || {};
 	if (conf.isHighAvailabilityNode)
 		return handle("high availability node cannot create channel");
@@ -390,11 +390,7 @@ function createNewChannel(peer, initial_amount, options, handle){
 	if (matches){ //it's a pairing address
 		if (conf.isHighAvailabilityNode)
 			return handle("pairing address cannot be used in high availability mode");
-		correspondents.findOrAddCorrespondentByPairingCode(peer, function (error, correspondent){
-			if (error)
-				return console.log("error when looking for correspondent: " + error);
-			correspondent_address = correspondent;
-		});
+		correspondent_address = await correspondents.findOrAddCorrespondentByPairingCode(peer);
 		if (!correspondent_address)
 			return handle("couldn't pair with device");
 	} else if (isUrl(peer)){

@@ -179,7 +179,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 				} else{
 					var connOrDagDB = conn;
 				}
-				var lockedChannelRows = await appDB.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
+				var lockedChannelRows = await connOrDagDB.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
 				var lockedChannel = lockedChannelRows[0];
 				var byteAmountRows = await connOrDagDB.query("SELECT amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
