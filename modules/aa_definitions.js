@@ -123,8 +123,6 @@ return 	['autonomous agent', {
 						state: `{
 							var['spentByA'] = $bFromA ? $transferredFromMe : $transferredFromPeer;
 							var['spentByB'] = $bFromB ? $transferredFromMe : $transferredFromPeer;
-							$finalBalanceA = var['balanceA'] - var['spentByA'] + var['spentByB'];
-							$finalBalanceB = var['balanceB'] - var['spentByB'] + var['spentByA'];
 							var['close_initiated_by'] = $party;
 							var['close_start_ts'] = timestamp;
 							if (!var['event_id'])
@@ -147,7 +145,7 @@ return 	['autonomous agent', {
 					$additionalSpentByB = $party == 'B' ? $additionnalTransferredFromMe : 0;
 					$balanceA = var['balanceA'] - var['spentByA'] + var['spentByB'] + $additionalSpentByB - $additionalSpentByA;
 					$balanceB = var['balanceB'] - var['spentByB'] + var['spentByA'] + $additionalSpentByA - $additionalSpentByB;
-					$finalBalanceA = $balanceA > 0 ? $balanceA : 0; // balance could be zero if an unconfirmed deposit were lost 
+					$finalBalanceA = $balanceA > 0 ? $balanceA : 0; // balance could be < 0 if an unconfirmed deposit were lost 
 					$finalBalanceB = $balanceB > 0 ? $balanceB : 0;
 				}`,
 				messages: [

@@ -68,8 +68,6 @@ async function init(){
 				return delete assocResponseByTag[receivedObject.tag];
 			}
 			return treatIncomingRequest(receivedObject, function(objResponse){
-				if (!conf.giveAndExpectResponse)
-					return;
 				objResponse.tag = receivedObject.tag;
 				objResponse.url = null; // this attribute is reserved for peer url
 				const device = require('ocore/device.js');
@@ -91,10 +89,7 @@ async function init(){
 				return response.send({ error: "bad request" });
 			else
 				treatIncomingRequest(request.body, function(objResponse){
-					if (conf.giveAndExpectResponse)
 						return response.send(objResponse);
-					else
-						return response.send();
 				});
 		});
 		app.listen(conf.httpDefaultPort);
@@ -148,7 +143,7 @@ async function treatIncomingRequest(objRequest, handle){
 		const channels = await appDB.query("SELECT status,asset,is_definition_confirmed FROM channels WHERE aa_address=?", [objRequest.params.aa_address]);
 		if (channels.length === 0)
 			return handle({ error: "aa address not known" });
-		if (channels[0].status == "open" || channels[0].status == "ready")
+		if (channels[0].status == "open")
 			return handle({ response: true });
 		else if (channels[0].status == "created" || channels[0].status == "close"){
 			getUnconfirmedSpendableAmountForChannel(appDB, channels[0], objRequest.params.aa_address, function(error, allowed_unconfirmed_amount){
@@ -199,7 +194,7 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 
 	const unconfirmedSpendableByAsset = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_asset - unconfirmedSpentByAsset, 0);
 	const unconfirmedSpendableByChannel = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_channel - unconfirmedSpentByChannel, 0);
-	console.error("unconfirmedDeposit " + unconfirmedDeposit);
+
 	return handle(null, Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit));
 }
 
@@ -321,7 +316,7 @@ function deposit(aa_address, amount, handle){
 			unlock();
 			return handle("amount must be > 1e4");
 		}
-		if (channel.status != "open" && channel.status != "ready" && channel.status != "closed" && channel.status != "created"){
+		if (channel.status != "open" && channel.status != "closed" && channel.status != "created"){
 			unlock();
 			return handle("channel status: " + channel.status + ", no deposit possible");
 		}
@@ -363,15 +358,17 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		return handle("timeout must be a positive integer");
 	if (options.asset && !validationUtils.isValidBase64(options.asset,44))
 		return handle("asset is not valid");
-	if (!options.asset && initial_amount <= 1e5)
-		return handle("initial_amount must be > 1e5");
+	if (!options.asset && initial_amount <= 1e4)
+		return handle("initial_amount must be > 1e4");
 	if (options.auto_refill_threshold && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
 		return handle("auto_refill_threshold must be positive integer");
 	if (options.auto_refill_amount && !validationUtils.isPositiveInteger(options.auto_refill_amount))
 		return handle("auto_refill_amount must be positive integer");
+	if (options.auto_refill_amount && options.auto_refill_amount <= 1e4)
+		return handle("auto_refill_amount must be superior to 1e4");
 	if (validationUtils.isNonemptyString(options.salt) && options.salt.length > 50)
 		return handle("Salt must be 50 char max");
-	if (!conf.giveAndExpectResponse && !validationUtils.isValidAddress(options.peer_address))
+	if (!peer && !validationUtils.isValidAddress(options.peer_address))
 		return handle( "peer_address is not valid");
 
 	const asset = options.asset || 'base';
@@ -395,11 +392,11 @@ async function createNewChannel(peer, initial_amount, options, handle){
 			return handle("couldn't pair with device");
 	} else if (isUrl(peer)){
 		peer_url = peer.substr(-1) == "/" ? peer : peer + "/";
-	} else if(conf.giveAndExpectResponse){
-		return handle("giveAndExpectResponse set to true but no peer specified");
+	} else if(!options.peer_address){
+		return handle("peer address not specified and no way to contact peer");
 	}
 
-	if (conf.giveAndExpectResponse){ //if we expect response, channel is created after confirmation from peer
+	if (peer){ //if we expect response, channel is created after confirmation from peer
 		var responseCb = function(responseFromPeer){
 			treatResponseToChannelCreation(responseFromPeer, function(error, response){
 				if (error)
@@ -545,8 +542,7 @@ function signMessage(message, address){
 
 function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 	const tag = crypto.randomBytes(30).toString('hex');
-	if (conf.giveAndExpectResponse)
-		assocResponseByTag[tag] = responseCb;
+	assocResponseByTag[tag] = responseCb;
 	objToBeSent.tag = tag;
 	if (comLayer == "obyte-messenger"){
 		if (conf.isHighAvailabilityNode)
@@ -562,12 +558,11 @@ function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 			}
 			if (assocResponseByTag[tag]) //if timeout not reached
 				delete assocResponseByTag[tag];
-			if (conf.giveAndExpectResponse)
-				responseCb(body);
+			responseCb(body);
 		});
 	}
 
-	if (timeOutCb && conf.giveAndExpectResponse)
+	if (timeOutCb)
 		setTimeout(function(){
 			if (assocResponseByTag[tag]){
 				timeOutCb();
@@ -610,14 +605,16 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 }
 
 function autoRefillChannels(){
-	mutex.lock(["autoRefillChannels"], async function(unlock){
+	mutex.lockOrSkip(["autoRefillChannels"], async function(unlock){
 		const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
 		IFNULL((SELECT SUM(amount) FROM my_deposits WHERE my_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
 		FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold"); //pending deposits are taken into account when comparing with auto_refill_threshold
 		async.eachSeries(rows, function(row, cb){
 			deposit(row.aa_address, row.auto_refill_amount, function(error){
-				if (error)
+				if (error){
 					console.log("error when auto refill " + error);
+					return cb();
+				}
 				else {
 					console.log("channel " + row.aa_address + " refilled with " + row.auto_refill_amount + " bytes");
 					eventBus.emit("channel_refilled", row.aa_address, row.auto_refill_amount);
@@ -664,7 +661,7 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		if (!my_address)
 			return unlockAndHandle("not initialized");
 
-		const channels = await appDB.query("SELECT status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,\n\
+		const channels = await appDB.query("SELECT is_peer_ready,status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,\n\
 		amount_spent_by_me,is_known_by_peer,salt,timeout,asset FROM channels WHERE aa_address=?", [aa_address]);
 
 		if (channels.length === 0)
@@ -677,6 +674,10 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 
 		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
 			return unlockAndHandle( "closing initiated");
+
+		const unconfirmedClosingUnitsRows = await appDB.query("SELECT 1 FROM unconfirmed_units_from_peer WHERE close_channel=1 AND aa_address=?", [aa_address]);
+		if (unconfirmedClosingUnitsRows[0])
+			return unlockAndHandle( "closing initiated by peer");
 
 		const my_pending_deposits_rows = await appDB.query("SELECT SUM(amount) as total_amount FROM my_deposits WHERE aa_address=? AND is_confirmed_by_aa=0",[aa_address]);
 		const my_pending_deposits = my_pending_deposits_rows[0] ? my_pending_deposits_rows[0].total_amount : 0;
@@ -691,11 +692,11 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		if (peer){ // if we have a way to query the peer, we check that it sees channel open as well
 			comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
 
-			if (channel.status != "ready" && conf.giveAndExpectResponse){
+			if (channel.is_peer_ready === 0){
 				if (await askIfChannelReady(comLayer, peer, aa_address))
-					await appDB.query("UPDATE channels SET status='ready',is_known_by_peer=1 WHERE aa_address=?", [aa_address]);
+					await appDB.query("UPDATE channels SET is_peer_ready=1,is_known_by_peer=1 WHERE aa_address=?", [aa_address]);
 				else
-					return unlockAndHandle("Channel is not open for peer");
+					return unlockAndHandle("Channel is not open for peer or he didn't respond");
 			}
 
 		} else{

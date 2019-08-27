@@ -133,7 +133,7 @@ async function getSqlFilterForNewUnitsFromPeers(aa_address){
 
 function treatNewUnitsToAA(arrUnits, aa_address){
 	return new Promise(async (resolve) => {
-		mutex.lockOrSkip(['treatNewUnitsToAA'], async (unlock) => {
+		mutex.lock(['treatNewUnitsToAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			// we select units having output address and author matching known channels
 			const new_units = await dagDB.query("SELECT DISTINCT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
@@ -259,8 +259,8 @@ function takeAppDbConnectionPromise(){
 }
 
 function treatStableUnitsFromAA(arrUnits){
-	return new Promise(async (resolve_1, reject_1) => {
-		mutex.lockOrSkip(['treatStableUnitsFromAA'], async (unlock) => {
+	return new Promise(async (resolve_1) => {
+		mutex.lock(['treatStableUnitsFromAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			const isStableFilter = conf.bLight ? " AND is_stable=1 AND sequence='good' " : ""; // unit from AA from can always be considered as stable on full node
 
@@ -286,7 +286,7 @@ function treatStableUnitsFromAA(arrUnits){
 
 
 function treatStableUnitFromAA(new_unit){
-	return new Promise(async (resolve, reject) => {
+	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
 			var conn = await takeAppDbConnectionPromise();
 			if (conf.isHighAvailabilityNode) {
@@ -356,6 +356,7 @@ function treatStableUnitFromAA(new_unit){
 				await setLastUpdatedMciAndEventIdAndOtherFields(
 					{
 						status: "closed",
+						is_peer_ready: 0,
 						period: payload.period,
 						amount_spent_by_peer: 0,
 						amount_spent_by_me: 0,
@@ -430,7 +431,7 @@ function treatClosingRequests(){
 
 
 function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
-	return new Promise((resolve, reject) => {
+	return new Promise((resolve) => {
 		mutex.lock(['confirm_' + aa_address], function(unlock){
 			if (fraud_proof){
 				var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
