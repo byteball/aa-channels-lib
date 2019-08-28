@@ -29,7 +29,7 @@ eventBus.once('headless_wallet_ready', function(){
 		my_address = _my_address;
 		await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
 		await treatStableUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
-		setInterval(lookForAndProcessTasks, 3000);
+		setInterval(lookForAndProcessTasks, 2000);
 	});
 });
 
@@ -62,8 +62,24 @@ function lookForAndProcessTasks(){ // main loop for repetitive tasks
 	if (conf.bLight)
 		updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
+	deletePendingUnconfirmedUnits();
 	if (conf.isHighAvailabilityNode)
 		treatClosingRequests();
+}
+
+// some unconfirmed units may be left if unit from AA were disorderly received
+async function deletePendingUnconfirmedUnits(){
+	const unconfirmedUnitsRows = await appDB.query("SELECT unit FROM unconfirmed_units_from_peer");
+	if (unconfirmedUnitsRows.length === 0)
+		return;
+	const mciAndUnitsRows = await dagDB.query("SELECT main_chain_index,unit FROM units WHERE unit IN ('"+ unconfirmedUnitsRows.map(function(row){ return row.unit }).join("','") + "') AND is_stable=1");
+	if (mciAndUnitsRows.length === 0)
+		return;
+	const sqlFilter = mciAndUnitsRows.map(function(row){
+		return "(unit='" + row.unit + "' AND last_updated_mci>="+ row.main_chain_index+")";
+	}).join(" OR ");
+	appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit IN (\n\
+		SELECT unit FROM unconfirmed_units_from_peer INNER JOIN channels USING (aa_address) WHERE " + sqlFilter +")");
 }
 
 async function updateAddressesToWatch(){
@@ -286,6 +302,7 @@ function treatStableUnitsFromAA(arrUnits){
 
 
 function treatStableUnitFromAA(new_unit){
+	console.error(new_unit.author_address + " " + new_unit.unit);
 	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
 			var conn = await takeAppDbConnectionPromise();

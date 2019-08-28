@@ -11,7 +11,7 @@ const correspondents = require('./modules/correspondents.js');
 const request = require('request');
 const async = require('async');
 
-const REQUEST_TIMEOUT = 8 * 1000;
+const REQUEST_TIMEOUT = 10 * 1000;
 
 if (!conf.isHighAvailabilityNode){
 	require('./aa_watcher.js'); // all code that requires headless wallet is in this module
@@ -390,13 +390,13 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		correspondent_address = await correspondents.findOrAddCorrespondentByPairingCode(peer);
 		if (!correspondent_address)
 			return handle("couldn't pair with device");
-	} else if (isUrl(peer)){
+	} else if (isUrl(peer)){ // it's an URL
 		peer_url = peer.substr(-1) == "/" ? peer : peer + "/";
-	} else if(!options.peer_address){
-		return handle("peer address not specified and no way to contact peer");
+	} else if(!validationUtils.isValidAddress(peer)){
+		return handle("no peer address nor way to contact peer");
 	}
 
-	if (peer){ //if we expect response, channel is created after confirmation from peer
+	if (correspondent_address || peer_url){ //if we expect response, channel is created after confirmation from peer
 		var responseCb = function(responseFromPeer){
 			treatResponseToChannelCreation(responseFromPeer, function(error, response){
 				if (error)
@@ -408,10 +408,10 @@ async function createNewChannel(peer, initial_amount, options, handle){
 			return handle('no response from peer');
 		};
 	} else { //if no response expected, channel is created immediately
-		const aa_address = aaDefinitions.getAaAddress(options.peer_address, my_address, options.timeout, asset, salt);
-		const arrAaDefinition = aaDefinitions.getAaArrDefinition(options.peer_address, my_address, options.timeout, asset, salt);
+		const aa_address = aaDefinitions.getAaAddress(peer, my_address, options.timeout, asset, salt);
+		const arrAaDefinition = aaDefinitions.getAaArrDefinition(peer, my_address, options.timeout, asset, salt);
 		return createChannelAndSendDefinitionAndDeposit(initial_amount, arrAaDefinition, options.auto_refill_threshold, options.auto_refill_amount, asset, 
-		options.timeout, aa_address, salt, options.peer_address, correspondent_address || null, peer_url || null, handle);
+		options.timeout, aa_address, salt, peer, null, null, handle);
 	}
 
 	const objToBeSent = {
@@ -699,8 +699,6 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 					return unlockAndHandle("Channel is not open for peer or he didn't respond");
 			}
 
-		} else{
-			return unlockAndHandle("no com layer for peer");
 		}
 		
 		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
@@ -752,18 +750,19 @@ function verifyPaymentPackage(objSignedPackage, handle){
 
 		const channels = await appDB.query("SELECT peer_address FROM channels WHERE aa_address=?", [objSignedMessage.aa_address]);
 		if (!channels[0]){ //if channel is not known, we check channel parameters if provided and save channel
-			if (objPackage.channel_parameters){
-				if (!objSignedPackage.authors || !objSignedPackage.authors[0] || objSignedPackage.authors[0].address != objPackage.channel_parameters.address)
+			if (objSignedMessage.channel_parameters){
+				if (!objSignedPackage.authors || !objSignedPackage.authors[0] || objSignedPackage.authors[0].address != objSignedMessage.channel_parameters.address)
 					return handle("address in channel_parameters mismatches with signing address");
-				saveChannelCreatedByPeer(objPackage.channel_parameters, function(error, objResult){
+				saveChannelCreatedByPeer(objSignedMessage.channel_parameters, function(error, objResult){
 					if (error)
 						return handle(error)
 					if (objResult.aa_address != objSignedMessage.aa_address)
 						return handle("channel_parameters doesn't correspond to aa_address");
-					verifyPaymentUnderLock()
+					return setTimeout(verifyPaymentUnderLock, 5000);
 					});
 				} else
 				return handle( "unknown channel");
+			return;
 		}
 
 		if (!objSignedPackage.authors || !objSignedPackage.authors[0] || objSignedPackage.authors[0].address != channels[0].peer_address) // better check now to avoid lock abuse from malicious peer
@@ -835,3 +834,5 @@ exports.sendMessageAndPay = sendMessageAndPay;
 exports.close = close;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
 exports.getBalancesAndStatus = getBalancesAndStatus;
+exports.verifyPaymentPackage = verifyPaymentPackage;
+exports.getPaymentPackage = getPaymentPackage;
