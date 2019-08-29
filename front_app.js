@@ -126,7 +126,7 @@ async function treatIncomingRequest(objRequest, handle){
 		if (typeof objRequest.params.signed_package != "object")
 			return handle({ error: "No signed_package" });
 
-		return treatPaymentFromPeer(objRequest.params.signed_package, function(error, result){
+		return treatPaymentFromPeer(objRequest.params, function(error, result){
 			if (error)
 				return handle({ error: error });
 			else
@@ -198,13 +198,13 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 	return handle(null, Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit));
 }
 
-function treatPaymentFromPeer(objSignedPackage, handle){
+function treatPaymentFromPeer(params, handle){
 
-	verifyPaymentPackage(objSignedPackage, function(error, payment_amount, asset, aa_address){
+	verifyPaymentPackage(params.signed_package, function(error, payment_amount, asset, aa_address){
 		if (error)
 			return handle(error);
 		if (paymentReceivedCallback){
-			paymentReceivedCallback(payment_amount, asset, objRequest.params.message, aa_address, function(cb_error, response){
+			paymentReceivedCallback(payment_amount, asset, params.message, aa_address, function(cb_error, response){
 				if (cb_error)
 					return handle(cb_error);
 				else
