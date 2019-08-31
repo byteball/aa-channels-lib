@@ -717,10 +717,6 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 			objPackage.channel_parameters.address = my_address;
 		}
 
-		const my_deposits = await appDB.query("SELECT unit FROM my_deposits WHERE aa_address=?", [aa_address]);
-		if (my_deposits[0] && my_deposits[0].unit)
-			objPackage.last_deposit_unit =  my_deposits[0].unit;
-
 		const objSignedPackage = await signMessage(objPackage, my_address);
 		
 		unlockAndHandle(null, objSignedPackage, peer, comLayer);
