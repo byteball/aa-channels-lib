@@ -302,7 +302,6 @@ function treatStableUnitsFromAA(arrUnits){
 
 
 function treatStableUnitFromAA(new_unit){
-	console.error(new_unit.author_address + " " + new_unit.unit);
 	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
 			var conn = await takeAppDbConnectionPromise();

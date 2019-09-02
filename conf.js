@@ -1,6 +1,6 @@
 exports.bServeAsHub = false;
 exports.bLight = true;
-exports.bSingleAddress = true;
+exports.bSingleAddress = true; // should always be true!
 
 exports.WS_PROTOCOL = "ws://";
 exports.hub = process.env.testnet ? 'obyte.org/bb-test' : 'obyte.org/bb';
@@ -16,9 +16,9 @@ exports.isHighAvailabilityNode =  false;
 
 exports.unconfirmedAmountsLimitsByAssetOrChannel = {
 	"base" : {
-		max_unconfirmed_by_asset : 100000,
-		max_unconfirmed_by_channel : 10000,
-		minimum_time_in_second : 1
+		max_unconfirmed_by_asset : 1e6,
+		max_unconfirmed_by_channel : 1e6,
+		minimum_time_in_second : 5
 	}
 }
 

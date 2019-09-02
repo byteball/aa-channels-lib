@@ -13,6 +13,9 @@ const async = require('async');
 
 const REQUEST_TIMEOUT = 10 * 1000;
 
+if (!conf.bSingleAddress)
+	throw Error("Node must be configured with bSingleAddress=true");
+
 if (!conf.isHighAvailabilityNode){
 	require('./aa_watcher.js'); // all code that requires headless wallet is in this module
 	var signedMessage = require('ocore/signed_message.js');

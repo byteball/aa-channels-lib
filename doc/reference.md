@@ -1,14 +1,3 @@
-## Installation
-
-Add it to your project:
-`npm install --save https://github.com/Papabyte/aa-channels-lib.git `
-
-## Usage:
-
-Require the module where you need it in your project. 
-
-`const channels = require('aa-channels-lib')`
-
 ## Configuration
 
 Add a conf.js in the root directory of your project modified according to your desired configuration
@@ -26,6 +15,19 @@ exports.control_addresses = [''];
 exports.minChannelTimeoutInSecond = 600;  // timeout value under which channel creation request will be refused
 exports.maxChannelTimeoutInSecond = 1000; // timeout value above which channel creation request will be refused
 exports.defaultTimeoutInSecond = 600;. // default timeout value for channels created by me
+
+exports.unconfirmedAmountsLimitsByAssetOrChannel = { // settings for accepting payments backed by unconfirmed channel and/or deposit
+	"base" : {
+		max_unconfirmed_by_asset : 1e6, // won't allow payment if current total unconfirmed over this amount
+		max_unconfirmed_by_channel : 1e6, // won't allow payment if total unconfirmed for a channel  is over this amount
+		minimum_time_in_second : 5 // won't allow payment if at least this time didn't elapse since peer's deposit
+	},
+	"VVjz0rDamfpjpwlRUWoffMxu5gkl/3mGerXNHsNuV7Q=" : {
+		max_unconfirmed_by_asset : 10000,
+		max_unconfirmed_by_channel : 5000,
+		minimum_time_in_second : 2
+	}
+}
 
 exports.isHighAvailabilityNode =  false;
 
@@ -47,11 +49,11 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
 - **peer**: peering address or http address of your peer.
 - **initial_amount**: initial amount in asset or bytes you want to deposit to channel.
 - **options** object with the follwing attributes:
-  * timeout (optionnal): timeout in seconds for the channel.
-  * asset (optionnal): asset used for all transactions with this channel, if null bytes will be used.
-  * auto_refill_threshold (optionnal): amount that is automatically refilled if available amount on channel goes below a threshold.
-  * auto_refill_amount (optionnal): amount available amount under which the channel will be automatically refilled.
-  * salt (optionnal): string that will be placed in the AA definition with no other purpose that generating a different AA address than other channels created with same peer addresses. It's especially useful when parties want to transact using several channels in parallel. If set to true, a random 50 characters salt with be used. 
+  * timeout (optional): timeout in seconds for the channel.
+  * asset (optional): asset used for all transactions with this channel, if null bytes will be used.
+  * auto_refill_threshold (optional): amount that is automatically refilled if available amount on channel goes below a threshold.
+  * auto_refill_amount (optional): amount available amount under which the channel will be automatically refilled.
+  * salt (optional): string that will be placed in the AA definition with no other purpose that generating a different AA address than other channels created with same peer addresses. It's especially useful when parties want to transact using several channels in parallel. If set to true, a random 50 characters salt with be used. 
 - **error**: if the creation is not successful, this string will indicate the reason.
 - **aa_address**: address of the channel, the created channel will further be identified by this address. It has the format of an Obyte payment address like `7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG`.
 - **unit**: hash of the unit that has been broacast to create the channel and deposit initial amount on it.
@@ -132,10 +134,29 @@ channels.getBalancesAndStatus(aa_address, function(response){
   * free_amount: amount available for spending by you through channel
   * my_deposits: total amount you have deposited but it's not confirmed yet
 
-## Events
-Require the Ocore event module where you need it in your project. 
+#### getPaymentPackage
+```javascript
+channels.getPaymentPackage(payment_amount, aa_address, function(error, objSignedPackage){
 
-`const eventBus = require('ocore/event_bus.js');`
+});
+```
+- **payment_amount**: amount you want to send in bytes or asset (according to channel's parameter)
+- **aa_address**: address of the channel you want to use to send payment
+- **error**: if package couldn't be obtained, this string will indicate the reason.
+- **objSignedPackage**: object to be transmitted to your peer to pay him
+
+#### verifyPaymentPackage
+```javascript
+channels.verifyPaymentPackage(objSignedPackage, function(error, payment_amount, asset, aa_address){
+});
+```
+- **objSignedPackage**: object obtained from peer
+- **error**: if verification failed, this string will indicate the reason.
+- **payment_amount**: amount received
+- **asset**: asset of payment received
+- **aa_address**: address of the channel that was used
+
+## Events
 
 #### front app scope*
 ```javascript

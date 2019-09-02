@@ -10,6 +10,7 @@
     "headless-obyte": "git+https://github.com/byteball/headless-obyte.git#aa",
     "is-url": "^1.2.4",
     "ocore": "git+https://github.com/byteball/ocore.git#rocks-and-formulas",
-    "request": "^2.88.0"
+    "request": "^2.88.0",
+    "rpcify": "git+https://github.com/byteball/rpcify"
   }
 }
