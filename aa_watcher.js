@@ -196,7 +196,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 				var byteAmountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
 				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
-					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset="+lockedChannel.asset +" ";
+					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset='"+lockedChannel.asset +"' ";
 					var amountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
