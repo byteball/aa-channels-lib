@@ -817,7 +817,8 @@ function verifyPaymentPackage(objSignedPackage, handle){
 			
 							await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?,is_known_by_peer=1\n\
 							WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
-								return unlockAndHandle(null, payment_amount, channel.asset, channel.aa_address);
+							eventBus.emit("payment_received", payment_amount, channel.asset, channel.aa_address);
+							return unlockAndHandle(null, payment_amount, channel.asset, channel.aa_address);
 						});
 				});
 			});

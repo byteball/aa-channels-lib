@@ -204,4 +204,4 @@ eventBus.on("refused_deposit",function(deposit unit){
 };
 ```
 
-*When the node isn't in high availability mode, there is no scope disctinction for events
+*When the node isn't in high availability mode, there is no scope distinction for events
