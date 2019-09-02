@@ -23,8 +23,8 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
 
 });
 ```
-**peer** is an url or a pairing address where the peer can be reached, if the peer acknowledged the creation, the definition of the AA is broadcast and immediately funded with initial deposit. **aa_address** is then returned by the function and is to be saved as it will used to identify channel for further operation.
-Once the payment channel is opened and confirmed by Obyte network, transactions can begin.
+**peer** is an url or a pairing address, **aa_address** is returned by the function and is to be saved as it will used to identify channel for further operation.
+Transactions can begin immediately if peer accepts unconfirmed payments or after confirmation by the network
 
 One peer wanting to send an offchain payment uses this function:
 
@@ -113,6 +113,10 @@ By default port 6333 is accessible through HTTP or websocket, websocket is manda
 Commands be send in JSON by POST method in http or websocket message, example: 
 `curl --data '{"jsonrpc":"2.0", "id":1, "method":"setAutoRefill", "params":["7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG",122000, 300000]}'`
 
+`method` is the name of the function you want to use, `params` is an array containing parameters you want to pass.
+
+All functions and events are available (except `setCallBackForPaymentReceived` function).
+
 Learn more on: https://github.com/byteball/rpcify
 </details>
 
@@ -134,7 +138,7 @@ exports.httpDefaultPort = 6800;
 ```javascript
 exports.enabledReceivers = [];
 ```
-Obtain payment packages with `getPaymentPackage` and verify them with `verifyPaymentPackage`
+Create channel with `createNewChannel` using peer's payment address as first parameter, obtain payment packages with `getPaymentPackage` and verify them with `verifyPaymentPackage`.
 </details>
 
 <details><summary>High Avaibility mode</summary>

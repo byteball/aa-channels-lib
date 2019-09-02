@@ -46,7 +46,7 @@ channels.createNewChannel(peer, initial_amount, options, function(error, aa_addr
 
 });
 ```
-- **peer**: peering address or http address of your peer.
+- **peer**: pairing address or http address of your peer if you use integrated communication. Peer's payment address if you use external communication.
 - **initial_amount**: initial amount in asset or bytes you want to deposit to channel.
 - **options** object with the follwing attributes:
   * timeout (optional): timeout in seconds for the channel.
@@ -160,7 +160,13 @@ channels.verifyPaymentPackage(objSignedPackage, function(error, payment_amount, 
 
 #### front app scope*
 ```javascript
-eventBus.on("channel_created_by_peer", function(peer payment address, aa_address){ 
+eventBus.on("channel_created_by_peer", function(peer payment address, aa_address){
+	
+});
+```
+
+```javascript
+eventBus.on("payment_received", function(payment_amount, asset, aa_address){
 	
 });
 ```
