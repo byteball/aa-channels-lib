@@ -282,7 +282,7 @@ async function close(aa_address, handle){
 			base_outputs: [{ address: aa_address, amount: 10000 }]
 		}
 
-		headlessWallet.sendMultiPayment(options, function(error, unit){
+		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				handle("error when closing channel " + error);
 			else{
