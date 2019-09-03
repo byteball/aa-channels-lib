@@ -40,21 +40,23 @@ function addCorrespondent(code, name, cb) {
 	handleCode(code);
 };
 
-function findCorrespondentByPairingCode(code, cb) {
-	let matches = code.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
-	if (!matches)
-		return cb("Invalid pairing code");
-	let pubkey = matches[1];
-	let hub = matches[2];
-
-	db.query("SELECT device_address FROM correspondent_devices WHERE pubkey = ? AND hub = ?", [pubkey, hub], (rows) => {
-		return cb(rows.length ? rows[0] : null);
+function findCorrespondentByPairingCode(code) {
+	return new Promise((resolve) => {
+		let matches = code.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/);
+		if (!matches){
+			resolve(null);
+		}
+		let pubkey = matches[1];
+		let hub = matches[2];
+		db.query("SELECT device_address FROM correspondent_devices WHERE pubkey = ? AND hub = ?", [pubkey, hub], (rows) => {
+			return resolve(rows.length ? rows[0].device_address : null);
+		});
 	});
 };
 
-exports.findOrAddCorrespondentByPairingCode = (code) => {
-	return new Promise((resolve) => {
-		findCorrespondentByPairingCode(code, (correspondent) => {
+function findOrAddCorrespondentByPairingCode (code){
+	return new Promise(async (resolve) => {
+		const correspondent = await findCorrespondentByPairingCode(code);
 			if (!correspondent){
 				addCorrespondent(code, 'Payment channel peer', (err, device_address) => {
 					if (err){
@@ -64,8 +66,10 @@ exports.findOrAddCorrespondentByPairingCode = (code) => {
 					resolve(device_address);
 				});
 			} else {
-				resolve(correspondent.device_address);
+				resolve(correspondent);
 			}
-		});
 	});
 }
+
+exports.findCorrespondentByPairingCode = findCorrespondentByPairingCode;
+exports.findOrAddCorrespondentByPairingCode = findOrAddCorrespondentByPairingCode;

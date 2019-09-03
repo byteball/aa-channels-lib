@@ -104,7 +104,6 @@ async function init(){
 
 // treat requests received either by messenger or POST http
 async function treatIncomingRequest(objRequest, handle){
-
 	if (objRequest.timestamp < (Date.now() - REQUEST_TIMEOUT / 2))
 		return handle({ error: "Timestamp too old, check system time" });
 	
@@ -206,6 +205,7 @@ function treatPaymentFromPeer(params, handle){
 	verifyPaymentPackage(params.signed_package, function(error, payment_amount, asset, aa_address){
 		if (error)
 			return handle(error);
+		eventBus.emit("payment_received", payment_amount, asset, params.message, aa_address);
 		if (paymentReceivedCallback){
 			paymentReceivedCallback(payment_amount, asset, params.message, aa_address, function(cb_error, response){
 				if (cb_error)
@@ -341,11 +341,44 @@ function deposit(aa_address, amount, handle){
 			} else{
 				await appDB.query("INSERT INTO my_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, amount, aa_address]);
 				unlock();
-				return handle(null);
+				return handle(null, unit);
 			}
 		});
 	});
 }
+
+async function getChannelsForPeer(peer, asset, handle){
+	if (!validationUtils.isNonemptyString(peer))
+		return ("peer must be a string");
+	if (asset && !validationUtils.isValidBase64(asset,44) && asset != 'base')
+		return ("invalid asset");
+	if (!asset)
+		asset = 'base';
+
+	if (peer.match(/^([\w\/+]+)@([\w.:\/-]+)#([\w\/+-]+)$/)){
+		const peer_device_address = await correspondents.findCorrespondentByPairingCode(peer);
+		if (!peer_device_address)
+			return handle("no peer known with this pairing code");
+		const rows = await appDB.query("SELECT aa_address FROM channels WHERE peer_device_address=? AND asset=?",[peer_device_address, asset]);
+		if (rows.length === 0)
+			return handle("no channel opened with this pairing code for this asset");
+		return handle(null, rows.map(function(row){return row.aa_address}));
+	} else if (isUrl(peer)){ // it's an URL
+		const peer_url = peer.substr(-1) == "/" ? peer : peer + "/";
+		const rows = await appDB.query("SELECT aa_address FROM channels WHERE peer_url=? AND asset=?",[peer_url, asset]);
+		if (rows.length === 0)
+			return handle("no channel opened with this peer url for this asset");
+		return handle(null, rows.map(function(row){return row.aa_address}));
+	} else if (validationUtils.isValidAddress(peer)){
+		const rows = await appDB.query("SELECT aa_address FROM channels WHERE peer=? AND asset=?",[peer, asset]);
+		if (rows.length === 0)
+			return handle("no channel opened with this peer address for this asset");
+		return handle(null, rows.map(function(row){return row.aa_address}));
+	} else {
+		return ("peer should be a pairing address, an url or a peer address");
+	}
+}
+
 
 async function createNewChannel(peer, initial_amount, options, handle){
 	options = options || {};
@@ -353,11 +386,13 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		return handle("high availability node cannot create channel");
 	if (!my_address)
 		return handle("not initialized");
-	if (peer && !validationUtils.isNonemptyString(peer))
+	if (!validationUtils.isNonemptyString(peer))
 		return handle("peer must be string");
 	if (!validationUtils.isPositiveInteger(initial_amount))
 		return handle("amount must be positive integer");
-	if (options.timeout && !validationUtils.isPositiveInteger(options.timeout))
+	if (!options.timeout)
+		options.timeout = conf.defaultTimeoutInSecond;
+	if (!validationUtils.isPositiveInteger(options.timeout))
 		return handle("timeout must be a positive integer");
 	if (options.asset && !validationUtils.isValidBase64(options.asset,44))
 		return handle("asset is not valid");
@@ -371,8 +406,6 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		return handle("auto_refill_amount must be superior to 1e4");
 	if (validationUtils.isNonemptyString(options.salt) && options.salt.length > 50)
 		return handle("Salt must be 50 char max");
-	if (!peer && !validationUtils.isValidAddress(options.peer_address))
-		return handle( "peer_address is not valid");
 
 	const asset = options.asset || 'base';
 
@@ -421,7 +454,7 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		command: "create_channel",
 		params: {
 			address: my_address,
-			timeout: options.timeout || conf.defaultTimeoutInSecond,
+			timeout: options.timeout,
 			asset: asset
 		}
 	}
@@ -432,7 +465,7 @@ async function createNewChannel(peer, initial_amount, options, handle){
 	if (correspondent_address)
 		sendRequestToPeer("obyte-messenger", correspondent_address, objToBeSent, responseCb, timeOutCb);
 	else if (peer_url)
-		sendRequestToPeer("http", peer, objToBeSent, responseCb, timeOutCb);
+		sendRequestToPeer("http", peer_url, objToBeSent, responseCb, timeOutCb);
 	else
 		throw Error("no correspondent_address nor peer_url");
 
@@ -557,7 +590,7 @@ function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 			json: objToBeSent
 		}, (error, res, body) => {
 			if (error || res.statusCode != 200){
-				return console.log("error in response from peer: " + peer + " " + JSON.stringify(res));
+				return console.log("error in response from peer: " + peer + " " + JSON.stringify(objToBeSent));
 			}
 			if (assocResponseByTag[tag]) //if timeout not reached
 				delete assocResponseByTag[tag];
@@ -653,6 +686,9 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 
 	if (!my_address)
 		return handle("not initialized");
+
+	if (!validationUtils.isPositiveInteger(payment_amount))
+		return handle("payment_amount must be a positive integer");
 
 	mutex.lock([aa_address], async function(unlock){
 
@@ -817,7 +853,6 @@ function verifyPaymentPackage(objSignedPackage, handle){
 			
 							await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?,is_known_by_peer=1\n\
 							WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
-							eventBus.emit("payment_received", payment_amount, channel.asset, channel.aa_address);
 							return unlockAndHandle(null, payment_amount, channel.asset, channel.aa_address);
 						});
 				});
@@ -836,3 +871,4 @@ exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
 exports.getBalancesAndStatus = getBalancesAndStatus;
 exports.verifyPaymentPackage = verifyPaymentPackage;
 exports.getPaymentPackage = getPaymentPackage;
+exports.getChannelsForPeer = getChannelsForPeer;

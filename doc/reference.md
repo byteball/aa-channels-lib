@@ -156,6 +156,17 @@ channels.verifyPaymentPackage(objSignedPackage, function(error, payment_amount, 
 - **asset**: asset of payment received
 - **aa_address**: address of the channel that was used
 
+#### getChannelsForPeer(peer, asset, handle)
+```javascript
+getChannelsForPeer(peer, asset, function(error, arrAddresses){
+	
+})
+```
+- **peer**: pairing address, http address or peer's payment address used at creation of channel(s) you are looking for.
+- **asset**: asset used by the channel(s) you are looking for.
+- **error**: if no channel can be found, this string will indicate the reason.
+- **arrAddresses**: array of aa_address corresponding to your request.
+
 ## Events
 
 #### front app scope*
@@ -166,7 +177,7 @@ eventBus.on("channel_created_by_peer", function(peer payment address, aa_address
 ```
 
 ```javascript
-eventBus.on("payment_received", function(payment_amount, asset, aa_address){
+eventBus.on("payment_received", function(payment_amount, asset, message, aa_address){
 	
 });
 ```
