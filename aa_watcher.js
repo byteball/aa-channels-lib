@@ -191,7 +191,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 				} else{
 					var connOrDagDB = conn;
 				}
-				var lockedChannelRows = await connOrDagDB.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
+				var lockedChannelRows = await conn.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
 				var lockedChannel = lockedChannelRows[0];
 				var byteAmountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
@@ -382,7 +382,7 @@ function treatStableUnitFromAA(new_unit){
 						amount_possibly_lost_by_me: 0,
 						last_message_from_peer: ''
 					});
-				const rows = await dagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
+				const rows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
 				if (payload.fraud_proof)
 					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
 				else
