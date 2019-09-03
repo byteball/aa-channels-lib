@@ -285,9 +285,10 @@ async function close(aa_address, handle){
 		headlessWallet.sendMultiPayment(options, function(error, unit){
 			if (error)
 				handle("error when closing channel " + error);
-			else
-				appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=?", [aa_address]);
-
+			else{
+				await appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open' OR status='created')", [aa_address]);
+				handle(null);
+			}
 		});
 
 	} else {
