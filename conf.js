@@ -8,9 +8,9 @@ exports.deviceName = 'AA-channel-lib';
 exports.permanent_pairing_secret = '0000';
 exports.control_addresses = [''];
 
-exports.minChannelTimeoutInSecond = 600;
-exports.maxChannelTimeoutInSecond = 1000;
-exports.defaultTimeoutInSecond = 600;
+exports.minChannelTimeoutInSecond = 800;
+exports.maxChannelTimeoutInSecond = 1500;
+exports.defaultTimeoutInSecond = 1000;
 
 exports.isHighAvailabilityNode =  false;
 

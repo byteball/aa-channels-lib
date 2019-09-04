@@ -712,8 +712,9 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		if (channel.peer_device_address && conf.isHighAvailabilityNode)
 			return unlockAndHandle("device address cannot be used in high availability mode");
 
-		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
-			return unlockAndHandle( "closing initiated");
+		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged'
+		|| channel.status == 'confirmed_by_me')
+			return unlockAndHandle( "closing in progress");
 
 		const unconfirmedClosingUnitsRows = await appDB.query("SELECT 1 FROM unconfirmed_units_from_peer WHERE close_channel=1 AND aa_address=?", [aa_address]);
 		if (unconfirmedClosingUnitsRows[0])
