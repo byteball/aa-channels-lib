@@ -188,16 +188,22 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 			unconfirmedDeposit += row.amount;
 	})
 
-	const unconfirmedSpentByAssetRows =	await conn.query("SELECT SUM(amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me) AS amount FROM channels WHERE asset=?",[objChannel.asset]);
+	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
+
+	var unconfirmedSpentByAsset = 0; 
+	unconfirmedSpentByAssetRows.forEach(function(row){
+		unconfirmedSpentByAsset+= Math.max(row.amount, 0);
+	});
+
 	const unconfirmedSpentByChannelRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE aa_address=?",[aa_address]);
 
-	const unconfirmedSpentByAsset = unconfirmedSpentByAssetRows[0] ? Math.max(unconfirmedSpentByAssetRows[0].amount, 0) : 0;
 	const unconfirmedSpentByChannel = unconfirmedSpentByChannelRows[0] ? Math.max(unconfirmedSpentByChannelRows[0].amount, 0) : 0;
 
 	const unconfirmedSpendableByAsset = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_asset - unconfirmedSpentByAsset, 0);
 	const unconfirmedSpendableByChannel = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_channel - unconfirmedSpentByChannel, 0);
 	
 	const maxUnconfirmedSpendable = Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit);
+
 	return handle(null, Math.max(objChannel.amount_spent_by_me, maxUnconfirmedSpendable));
 }
 
@@ -261,12 +267,15 @@ function setCallBackForPaymentReceived(_cb){
 
 async function close(aa_address, handle){
 	if (!conf.isHighAvailabilityNode){
-		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer FROM channels WHERE aa_address=?", [aa_address]);
+		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer, status FROM channels WHERE aa_address=?", [aa_address]);
 		if (channels.length === 0)
 			return handle("unknown AA address");
 		const channel = channels[0];
 
-		const payload = { close: 1, period: channel.period };
+		const payload = { 
+			close: 1, 
+			period: channel.status == 'closed' || channel.status == 'created' ? channel.period + 1 : channel.period
+		 };
 		if (channel.amount_spent_by_me + channel.overpayment_from_peer > 0)
 			payload.transferredFromMe = channel.amount_spent_by_me + channel.overpayment_from_peer;
 		if (channel.amount_spent_by_peer > 0)
