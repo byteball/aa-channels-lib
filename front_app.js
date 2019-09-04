@@ -142,7 +142,7 @@ async function treatIncomingRequest(objRequest, handle){
 			return handle({ error: "No params" });
 		if (!validationUtils.isValidAddress(objRequest.params.aa_address))
 			return handle({ error: "Invalid aa address" });
-		const channels = await appDB.query("SELECT status,asset,is_definition_confirmed FROM channels WHERE aa_address=?", [objRequest.params.aa_address]);
+		const channels = await appDB.query("SELECT status,asset,is_definition_confirmed,amount_spent_by_me FROM channels WHERE aa_address=?", [objRequest.params.aa_address]);
 		if (channels.length === 0)
 			return handle({ error: "aa address not known" });
 		if (channels[0].status == "open")
@@ -188,16 +188,17 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 			unconfirmedDeposit += row.amount;
 	})
 
-	const unconfirmedSpentByAssetRows =	await conn.query("SELECT SUM(amount_spent_by_peer - amount_deposited_by_peer) AS amount FROM channels WHERE asset=?",[objChannel.asset]);
-	const unconfirmedSpentByChannelRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer AS amount FROM channels WHERE aa_address=?",[aa_address]);
+	const unconfirmedSpentByAssetRows =	await conn.query("SELECT SUM(amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me) AS amount FROM channels WHERE asset=?",[objChannel.asset]);
+	const unconfirmedSpentByChannelRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE aa_address=?",[aa_address]);
 
 	const unconfirmedSpentByAsset = unconfirmedSpentByAssetRows[0] ? Math.max(unconfirmedSpentByAssetRows[0].amount, 0) : 0;
 	const unconfirmedSpentByChannel = unconfirmedSpentByChannelRows[0] ? Math.max(unconfirmedSpentByChannelRows[0].amount, 0) : 0;
 
 	const unconfirmedSpendableByAsset = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_asset - unconfirmedSpentByAsset, 0);
 	const unconfirmedSpendableByChannel = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_channel - unconfirmedSpentByChannel, 0);
-
-	return handle(null, Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit));
+	
+	const maxUnconfirmedSpendable = Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit);
+	return handle(null, Math.max(objChannel.amount_spent_by_me, maxUnconfirmedSpendable));
 }
 
 function treatPaymentFromPeer(params, handle){
