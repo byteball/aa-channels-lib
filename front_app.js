@@ -147,7 +147,7 @@ async function treatIncomingRequest(objRequest, handle){
 			return handle({ error: "aa address not known" });
 		if (channels[0].status == "open")
 			return handle({ response: true });
-		else if (channels[0].status == "created" || channels[0].status == "close"){
+		else if (channels[0].status == "created" || channels[0].status == "closed"){
 			getUnconfirmedSpendableAmountForChannel(appDB, channels[0], objRequest.params.aa_address, function(error, allowed_unconfirmed_amount){
 				if (error)
 					return handle({ error: error });
@@ -837,7 +837,7 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					var amount_deposited_by_peer = channel.amount_deposited_by_peer;
 						if (channel.status == 'open' && channel.period != objSignedMessage.period)
 						return unlockAndHandle( "wrong period");
-						if (channel.status == 'close' && (channel.period +1) != objSignedMessage.period)
+						if (channel.status == 'closed' && (channel.period +1) != objSignedMessage.period)
 							return unlockAndHandle( "wrong period");
 
 						getUnconfirmedSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
