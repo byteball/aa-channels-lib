@@ -683,13 +683,15 @@ async function setAutoRefill(aa_address, refill_amount, refill_threshold, handle
 }
 
 async function getBalancesAndStatus(aa_address, handle){
-	const rows = await appDB.query("SELECT status,amount_deposited_by_me,amount_spent_by_me, amount_spent_by_peer, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+	const rows = await appDB.query("SELECT status,amount_deposited_by_me,amount_deposited_by_peer,amount_spent_by_me, amount_spent_by_peer, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
 	IFNULL((SELECT SUM(amount) FROM my_deposits WHERE my_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS my_deposits\n\
 	FROM channels WHERE channels.aa_address=?", [aa_address]);
 	if (rows.length === 0)
 		return handle("aa_address not known");
-	else
+	else {
+		rows[0].free_amount = Math.max(rows[0].free_amount, 0);
 		return handle(null, rows[0]);
+	}
 
 }
 
