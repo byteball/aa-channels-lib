@@ -747,7 +747,7 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		const objPackage = { 
 			payment_amount: payment_amount, 
 			amount_spent: (payment_amount + channel.amount_spent_by_me), 
-			period: channel.period, 
+			period: channel.status == 'closed' || channel.status == 'created' ? channel.period + 1 : channel.period, // if channel is created or closed, payment package is created for next period
 			aa_address: aa_address 
 		};
 		if (channel.is_known_by_peer === 0) { // if channel is not known by peer, we add the parameters allowing him to save it on this side
@@ -835,28 +835,28 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
 						return unlockAndHandle( "closing initiated");
 					var amount_deposited_by_peer = channel.amount_deposited_by_peer;
-						if (channel.status == 'open' && channel.period != objSignedMessage.period)
+					if (channel.status == 'open' && channel.period != objSignedMessage.period)
+					return unlockAndHandle( "wrong period");
+					if (channel.status == 'closed' && (channel.period +1) != objSignedMessage.period)
 						return unlockAndHandle( "wrong period");
-						if (channel.status == 'closed' && (channel.period +1) != objSignedMessage.period)
-							return unlockAndHandle( "wrong period");
 
-						getUnconfirmedSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
-							if (error)
-								return unlockAndHandle( error);
+					getUnconfirmedSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
+						if (error)
+							return unlockAndHandle( error);
 
-							const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
-							const peer_credit = delta_amount_spent + channel.overpayment_from_peer;
+						const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
+						const peer_credit = delta_amount_spent + channel.overpayment_from_peer;
 
-							if (objSignedMessage.amount_spent > (amount_deposited_by_peer + unconfirmed_amount + channel.amount_spent_by_me))
-								return unlockAndHandle( "AA not funded enough");
+						if (objSignedMessage.amount_spent > (amount_deposited_by_peer + unconfirmed_amount + channel.amount_spent_by_me))
+							return unlockAndHandle( "AA not funded enough");
 
-							if (payment_amount > (peer_credit + unconfirmed_amount))
-								return unlockAndHandle( "Payment amount is over your available credit");
-			
-							await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?,is_known_by_peer=1\n\
-							WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
-							return unlockAndHandle(null, payment_amount, channel.asset, channel.aa_address);
-						});
+						if (payment_amount > (peer_credit + unconfirmed_amount))
+							return unlockAndHandle( "Payment amount is over your available credit");
+		
+						await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?,is_known_by_peer=1\n\
+						WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
+						return unlockAndHandle(null, payment_amount, channel.asset, channel.aa_address);
+					});
 				});
 			});
 		}
