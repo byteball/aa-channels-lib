@@ -167,6 +167,37 @@ getChannelsForPeer(peer, asset, function(error, arrAddresses){
 - **error**: if no channel can be found, this string will indicate the reason.
 - **arrAddresses**: array of aa_address corresponding to your request.
 
+#### setMaxUnconfirmedByAsset(asset, amount)
+```javascript
+function setMaxUnconfirmedByAsset(asset, amount){
+
+}
+```
+Override max_unconfirmed_by_asset setting from conf.js
+- **asset**: asset for which you want to set an overall limit
+- **amount**: maximum unconfirmed overall amount
+
+#### setMaxUnconfirmedByAssetAndChannel(asset, amount)
+```javascript
+function setMaxUnconfirmedByAssetAndChannel(asset, amount){
+
+}
+```
+Override max_unconfirmed_by_channel setting from conf.js
+- **asset**: asset for which you want to set a limit by channel
+- **amount**: maximum unconfirmed amount by channel
+
+#### setMinimumTimeToWaitForUnconfirmedPaymentByAsset(asset, time)
+```javascript
+function setMaxUnconfirmedByAssetAndChannel(asset, amount){
+
+}
+```
+Override minimum_time_in_second setting from conf.js
+- **asset**: asset for which you want to set minimum time
+- **time**: minimum time to wait after deposit unit before accepting payment 
+
+
 ## Events
 
 #### front app scope*

@@ -165,10 +165,7 @@ async function treatIncomingRequest(objRequest, handle){
 
 async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
-	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel || !conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset])
-		return handle(null, 0); // unconfirmed channel not allowed
-
-	const maxValidTimestamp = Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second;
+	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second ? Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second : 0;
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
 	const bHasBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel === 1});
@@ -187,6 +184,9 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 		if (row.timestamp < maxValidTimestamp)
 			unconfirmedDeposit += row.amount;
 	})
+
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel || !conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset])
+		return handle(null, objChannel.amount_spent_by_me); // if unconfirmed max amount are not configured, only amount_spent_by_me can be spent by peer
 
 	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
 
@@ -876,6 +876,54 @@ function verifyPaymentPackage(objSignedPackage, handle){
 
 }
 
+
+function initializeUnconfirmedAmountsLimitsByAssetOrChannel(asset){
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
+		conf.unconfirmedAmountsLimitsByAssetOrChannel = {}; 
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel[asset])
+		conf.unconfirmedAmountsLimitsByAssetOrChannel[asset] = {};
+}
+
+function setMaxUnconfirmedByAsset(asset, amount){
+	if (!validationUtils.isNonnegativeInteger(amount))
+		return false;
+	if (!asset)
+		asset = 'base';
+	if (asset != 'base' &&	!validationUtils.isValidBase64(asset, 44))
+		return false;
+	initializeUnconfirmedAmountsLimitsByAssetOrChannel(asset);
+	conf.unconfirmedAmountsLimitsByAssetOrChannel[asset].max_unconfirmed_by_asset = amount;
+	return true;
+}
+
+function setMaxUnconfirmedByAssetAndChannel(asset, amount){
+	if (!validationUtils.isNonnegativeInteger(amount))
+		return false;
+		if (!asset)
+		asset = 'base';
+	if (asset != 'base' &&	!validationUtils.isValidBase64(asset, 44))
+		return false;
+	initializeUnconfirmedAmountsLimitsByAssetOrChannel(asset);
+	conf.unconfirmedAmountsLimitsByAssetOrChannel[asset].max_unconfirmed_by_channel = amount;
+	return true;
+}
+
+function setMinimumTimeToWaitForUnconfirmedPaymentByAsset(asset, time){
+	if (!validationUtils.isNonnegativeInteger(time))
+		return false;
+		if (!asset)
+		asset = 'base';
+	if (asset != 'base' &&	!validationUtils.isValidBase64(asset, 44))
+		return false;
+	initializeUnconfirmedAmountsLimitsByAssetOrChannel(asset);
+	conf.unconfirmedAmountsLimitsByAssetOrChannel[asset].minimum_time_in_second = time;
+	return true;
+}
+
+
+exports.setMaxUnconfirmedByAsset = setMaxUnconfirmedByAsset;
+exports.setMaxUnconfirmedByAssetAndChannel = setMaxUnconfirmedByAssetAndChannel;
+exports.setMinimumTimeToWaitForUnconfirmedPaymentByAsset = setMinimumTimeToWaitForUnconfirmedPaymentByAsset;
 exports.setAutoRefill = setAutoRefill;
 exports.createNewChannel = createNewChannel;
 exports.deposit = deposit;
