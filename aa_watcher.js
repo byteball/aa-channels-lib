@@ -360,9 +360,9 @@ function treatStableUnitFromAA(new_unit){
 				else {
 					var status = "closing_initiated_by_peer";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
-						confirmClosing(conn, new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
+						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
 					} else {
-						await confirmClosing(conn, new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
@@ -448,37 +448,33 @@ function treatClosingRequests(){
 }
 
 
-function confirmClosing(conn, aa_address, period, overpayment_from_peer, fraud_proof){
-	return new Promise((resolve) => {
-		mutex.lock(['confirm_' + aa_address], function(unlock){
-			if (fraud_proof){
-				var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
-			} else {
-				var payload = { confirm: 1, period: period };
-			}
-			if (overpayment_from_peer > 0)
-				payload.additionnalTransferredFromMe = overpayment_from_peer;
+function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
+	mutex.lock(['confirm_' + aa_address], function(unlock){
+		if (fraud_proof){
+			var payload = { fraud_proof: 1, period: period, sentByPeer: JSON.parse(fraud_proof) };
+		} else {
+			var payload = { confirm: 1, period: period };
+		}
+		if (overpayment_from_peer > 0)
+			payload.additionnalTransferredFromMe = overpayment_from_peer;
 
-			const options = {
-				messages: [{
-					app: 'data',
-					payload_location: "inline",
-					payload_hash: objectHash.getBase64Hash(payload),
-					payload: payload
-				}],
-				change_address: my_address,
-				base_outputs: [{ address: aa_address, amount: 10000 }]
-			}
-	
-			headlessWallet.sendMultiPayment(options, async function(error, unit){
-				if (error)
-					console.log("error when closing channel " + error);
-				else
-					await conn.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
-				unlock();
-				resolve();
-			});
+		const options = {
+			messages: [{
+				app: 'data',
+				payload_location: "inline",
+				payload_hash: objectHash.getBase64Hash(payload),
+				payload: payload
+			}],
+			change_address: my_address,
+			base_outputs: [{ address: aa_address, amount: 10000 }]
+		}
 
+		headlessWallet.sendMultiPayment(options, async function(error, unit){
+			if (error)
+				console.log("error when closing channel " + error);
+			else
+				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
+			unlock();
 		});
 	});
 }
@@ -487,7 +483,7 @@ async function confirmClosingIfTimeoutReached(){
 	const current_ts = Math.round(Date.now() / 1000);
 	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me_acknowledged' AND close_timestamp < (? - timeout)", [current_ts]);
 	rows.forEach(function(row){
-		confirmClosing(appDB, row.aa_address, row.period);
+		confirmClosing(row.aa_address, row.period);
 	});
 }
 
