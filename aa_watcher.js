@@ -360,9 +360,9 @@ function treatStableUnitFromAA(new_unit){
 				else {
 					var status = "closing_initiated_by_peer";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
-						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
+						confirmClosing(conn, new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
 					} else {
-						await confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
+						await confirmClosing(conn, new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
@@ -448,7 +448,7 @@ function treatClosingRequests(){
 }
 
 
-function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
+function confirmClosing(conn, aa_address, period, overpayment_from_peer, fraud_proof){
 	return new Promise((resolve) => {
 		mutex.lock(['confirm_' + aa_address], function(unlock){
 			if (fraud_proof){
@@ -474,7 +474,7 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 				if (error)
 					console.log("error when closing channel " + error);
 				else
-					await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
+					await conn.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
 				unlock();
 				resolve();
 			});
@@ -487,7 +487,7 @@ async function confirmClosingIfTimeoutReached(){
 	const current_ts = Math.round(Date.now() / 1000);
 	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me_acknowledged' AND close_timestamp < (? - timeout)", [current_ts]);
 	rows.forEach(function(row){
-		confirmClosing(row.aa_address, row.period);
+		confirmClosing(appDB, row.aa_address, row.period);
 	});
 }
 
