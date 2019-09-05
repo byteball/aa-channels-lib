@@ -156,7 +156,7 @@ channels.verifyPaymentPackage(objSignedPackage, function(error, payment_amount, 
 - **asset**: asset of payment received
 - **aa_address**: address of the channel that was used
 
-#### getChannelsForPeer(peer, asset, handle)
+#### getChannelsForPeer
 ```javascript
 getChannelsForPeer(peer, asset, function(error, arrAddresses){
 	
@@ -167,7 +167,7 @@ getChannelsForPeer(peer, asset, function(error, arrAddresses){
 - **error**: if no channel can be found, this string will indicate the reason.
 - **arrAddresses**: array of aa_address corresponding to your request.
 
-#### setMaxUnconfirmedByAsset(asset, amount)
+#### setMaxUnconfirmedByAsset
 ```javascript
 function setMaxUnconfirmedByAsset(asset, amount){
 
@@ -177,7 +177,7 @@ Override max_unconfirmed_by_asset setting from conf.js
 - **asset**: asset for which you want to set an overall limit
 - **amount**: maximum unconfirmed overall amount
 
-#### setMaxUnconfirmedByAssetAndChannel(asset, amount)
+#### setMaxUnconfirmedByAssetAndChannel
 ```javascript
 function setMaxUnconfirmedByAssetAndChannel(asset, amount){
 
@@ -187,7 +187,7 @@ Override max_unconfirmed_by_channel setting from conf.js
 - **asset**: asset for which you want to set a limit by channel
 - **amount**: maximum unconfirmed amount by channel
 
-#### setMinimumTimeToWaitForUnconfirmedPaymentByAsset(asset, time)
+#### setMinimumTimeToWaitForUnconfirmedPaymentByAsset
 ```javascript
 function setMaxUnconfirmedByAssetAndChannel(asset, amount){
 
