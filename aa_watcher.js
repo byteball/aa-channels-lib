@@ -285,8 +285,8 @@ function treatStableUnitsFromAA(arrUnits){
 
 			if (new_units.length === 0){
 				unlock();
-				resolve_1();
-				return console.log("nothing concerns payment channel in these units");
+				console.log("nothing concerns payment channel in these units");
+				return resolve_1();
 			}
 
 			for (var i = 0; i < new_units.length; i++){
@@ -294,7 +294,7 @@ function treatStableUnitsFromAA(arrUnits){
 				await treatStableUnitFromAA(new_unit);
 			}
 			unlock();
-			resolve_1();
+			return resolve_1();
 		});
 	});
 }
@@ -357,7 +357,7 @@ function treatStableUnitFromAA(new_unit){
 				if (payload.initiated_by === my_address)
 					var status = "closing_initiated_by_me_acknowledged";
 				else {
-					var status = "closing_initiated_by_peer";
+					var status = "confirmed_by_me";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
 						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
 					} else {
@@ -471,8 +471,6 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				console.log("error when closing channel " + error);
-			else
-				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
 			unlock();
 		});
 	});
