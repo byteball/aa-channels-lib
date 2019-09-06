@@ -59,8 +59,7 @@ eventBus.on('sequence_became_bad', function(arrUnits){
 function lookForAndProcessTasks(){ // main loop for repetitive tasks
 	if(conf.bLight && !lightWallet.isFirstHistoryReceived())
 		return console.log("first history not processed");
-	if (conf.bLight)
-		updateAddressesToWatch();
+	updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
 	deletePendingUnconfirmedUnits();
 	if (conf.isHighAvailabilityNode)
