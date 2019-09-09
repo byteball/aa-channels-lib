@@ -28,20 +28,24 @@ eventBus.once('headless_wallet_ready', function(){
 	headlessWallet.readFirstAddress(async function(_my_address){
 		my_address = _my_address;
 		await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels_config (my_address) VALUES (?)", [_my_address]);
-		await treatStableUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
+		await treatUnitsFromAA(); // we look for units that weren't treated in case node was interrupted at bad time
 		setInterval(lookForAndProcessTasks, 2000);
 	});
 });
 
 if (conf.bLight){
 	eventBus.on('my_transactions_became_stable', function(arrUnits){
-		treatStableUnitsFromAA(arrUnits);
+		treatUnitsFromAA(arrUnits);
 	});
 } else {
 	eventBus.on('new_aa_unit', async function(objUnit){
 		const channels = await appDB.query("SELECT 1 FROM channels WHERE aa_address=?", [objUnit.authors[0].address]);
 		if (channels[0])
-			treatStableUnitsFromAA([objUnit.unit]);
+			treatUnitsFromAA([objUnit.unit]);
+	});
+
+	eventBus.on('my_transactions_became_stable', function(arrUnits){
+		updateLastMci(arrUnits); // once units from AA become stable, MCI is known and we can update last_updated_mci
 	});
 }
 
@@ -112,7 +116,7 @@ async function updateAddressesToWatch(){
 		}
 
 		async function treatUnitsAndAddWatchedAddress(){
-			await treatStableUnitsFromAA(); // we treat units from AA first to get more recent confirmed states
+			await treatUnitsFromAA(); // we treat units from AA first to get more recent confirmed states
 			await treatNewUnitsToAA(null, row.aa_address); 
 			walletGeneral.addWatchedAddress(row.aa_address, () => {
 			});
@@ -126,9 +130,9 @@ async function getSqlFilterForNewUnitsFromChannels(){
 		const rows = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
 		if (rows.length === 0)
 			return resolve(" 0 ");
-		var string = rows.map(function(row){
-			return " (author_address='" + row.aa_address + "' AND main_chain_index>" + row.last_updated_mci + ") ";
-		}).join(' OR ');
+		var string = "(" + rows.map(function(row){
+			return " (author_address='" + row.aa_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
+		}).join(' OR ') +")";
 		resolve(string);
 	});
 }
@@ -138,9 +142,9 @@ async function getSqlFilterForNewUnitsFromPeers(aa_address){
 		const rows = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
 		if (rows.length === 0)
 			return resolve(" 0 ");
-		var string = rows.map(function(row){
+		var string = "(" +  rows.map(function(row){
 			return " (outputs.address='" + row.aa_address +"' AND author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
-		}).join(' OR ');
+		}).join(' OR ') +")";
 		resolve(string);
 	});
 }
@@ -273,9 +277,32 @@ function takeAppDbConnectionPromise(){
 	});
 }
 
-function treatStableUnitsFromAA(arrUnits){
+async function updateLastMci(arrUnits){
+	if (conf.bLight)
+		throw Error("updateLastMci called by light node");
+	if (arrUnits.length === 0)
+		throw Error("arrUnits for updateLastMci cannot be empty");
+
+	const stable_units = await dagDB.query("SELECT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
+	CROSS JOIN unit_authors USING(unit)\n\
+	WHERE units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " + await getSqlFilterForNewUnitsFromChannels() +  " GROUP BY units.unit ORDER BY main_chain_index,level ASC");
+
+	for (var i = 0; i < stable_units.length; i++){
+		var stable_unit = stable_units[i];
+		if (!stable_unit.main_chain_index)
+			throw Error("No MCI for stable unit");
+		var payloads = await dagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [stable_unit.unit]);
+		var payload = payloads[0] ? JSON.parse(payloads[0].payload) : {};
+		if (payload.event_id)
+			await appDB.query("UPDATE channels SET last_updated_mci=? WHERE last_event_id>=? AND aa_address=?",
+			[stable_unit.main_chain_index, payload.event_id, stable_unit.author_address])
+	}
+}
+
+
+function treatUnitsFromAA(arrUnits){
 	return new Promise(async (resolve_1) => {
-		mutex.lock(['treatStableUnitsFromAA'], async (unlock) => {
+		mutex.lock(['treatUnitsFromAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			const isStableFilter = conf.bLight ? " AND is_stable=1 AND sequence='good' " : ""; // unit from AA from can always be considered as stable on full node
 
@@ -291,7 +318,7 @@ function treatStableUnitsFromAA(arrUnits){
 
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
-				await treatStableUnitFromAA(new_unit);
+				await treatUnitFromAA(new_unit);
 			}
 			unlock();
 			return resolve_1();
@@ -300,7 +327,7 @@ function treatStableUnitsFromAA(arrUnits){
 }
 
 
-function treatStableUnitFromAA(new_unit){
+function treatUnitFromAA(new_unit){
 	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
 			var conn = await takeAppDbConnectionPromise();
@@ -323,7 +350,7 @@ function treatStableUnitFromAA(new_unit){
 			var channel = channels[0];
 
 			var payloads = await connOrDagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
-			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : null;
+			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : {};
 
 			function setLastUpdatedMciAndEventIdAndOtherFields(fields){
 				return new Promise(async (resolve_2) => {
@@ -332,18 +359,19 @@ function treatStableUnitFromAA(new_unit){
 						for (var key in fields){
 							strSetFields += "," + key + "='" + fields[key] + "'";
 						}
-					await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + " WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index, payload.event_id, new_unit.author_address, payload.event_id]);
+					await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + "\n\
+					WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index ? new_unit.main_chain_index : channel.last_updated_mci, payload.event_id, new_unit.author_address, payload.event_id]);
 					return resolve_2();
 				});
 			}
 
 			//once AA state is updated by an unit, we delete the corresponding unit from unconfirmed units table
-			if (payload && payload.trigger_unit){
+			if (payload.trigger_unit){
 				await conn.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [payload.trigger_unit]);
 				delete assocJointsFromPeersCache[payload.trigger_unit];
 			}
 			//channel is open and received funding
-			if (payload && payload.open){
+			if (payload.open){
 				await conn.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
 				if (payload[my_address] > 0)
@@ -353,7 +381,7 @@ function treatStableUnitFromAA(new_unit){
 			}
 
 			//closing requested by one party
-			if (payload && payload.closing){
+			if (payload.closing){
 				if (payload.initiated_by === my_address)
 					var status = "closing_initiated_by_me_acknowledged";
 				else {
@@ -367,7 +395,7 @@ function treatStableUnitFromAA(new_unit){
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
 			}
 			//AA confirms that channel is closed
-			if (payload && payload.closed){
+			if (payload.closed){
 				await setLastUpdatedMciAndEventIdAndOtherFields(
 					{
 						status: "closed",
@@ -388,7 +416,7 @@ function treatStableUnitFromAA(new_unit){
 					eventBus.emit("channel_closed", new_unit.author_address, rows[0] ? rows[0].amount : 0);
 			}
 			//AA refused a deposit, we still have to update flag in my_deposits table so it's not considered as pending anymore
-			if (payload && payload.refused){
+			if (payload.refused){
 				const result = await appDB.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
 				if (result.affectedRows !== 0)
 					eventBus.emit("refused_deposit", payload.trigger_unit);
