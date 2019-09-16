@@ -24,7 +24,7 @@ if (!conf.isHighAvailabilityNode){
 	var signedMessage = require('./modules/signed_message.js'); // light version that doesn't require DAG DB
 }
 
-if (conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvailabilityNode)
+if (conf.enabledReceivers && conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvailabilityNode)
 	throw Error("Cannot use obyte-messenger layer as high avaibility node");
 if (!validationUtils.isPositiveInteger(conf.minChannelTimeoutInSecond) || !validationUtils.isPositiveInteger(conf.maxChannelTimeoutInSecond))
 	throw Error("minChannelTimeoutInSecond and maxChannelTimeoutInSecond in conf.js must be postive integer");
@@ -62,7 +62,7 @@ async function init(){
 		throw Error("my_address is not defined in app DB, perhaps the cause is that you've never started the watcher node");
 
 	//set up obyte-messenger receiver if enabled in conf
-	if (conf.enabledReceivers.includes('obyte-messenger')){
+	if (conf.enabledReceivers && conf.enabledReceivers.includes('obyte-messenger')){
 		console.log("obyte-messenger receiver enabled");
 		eventBus.on('object', function(from_address, receivedObject){
 			receivedObject.from_address = from_address;
@@ -80,30 +80,36 @@ async function init(){
 	}
 
 	//set up http server if enabled in conf
-	if (conf.enabledReceivers.includes('http') && conf.httpDefaultPort){
-		console.log("http receiver enabled");
-
-		const express = require('express')
-		const app = express()
-
-		app.use(require('body-parser').json());
-		app.post('/post', function(request, response){
-			if (typeof request != 'object' || typeof request.body != 'object')
-				return response.send({ error: "bad request" });
-			else
-				treatIncomingRequest(request.body, function(objResponse){
-						return response.send(objResponse);
-				});
-		});
-		app.listen(conf.httpDefaultPort);
+	if (conf.enabledReceivers && conf.enabledReceivers.includes('http') && conf.httpDefaultPort){
+		startHttpServer(conf.httpDefaultPort)
 	}
 	if (!conf.isHighAvailabilityNode)
 		setInterval(autoRefillChannels, 30000);
 }
 
+function startHttpServer(port){
+	const express = require('express')
+	const app = express()
+
+	app.use(require('body-parser').json());
+	app.post('/post', function(request, response){
+		if (typeof request != 'object' || typeof request.body != 'object')
+			return response.send({ error: "bad request" });
+		else
+			treatIncomingRequest(request.body, function(objResponse){
+					return response.send(objResponse);
+			});
+	});
+	app.listen(port);
+	console.log("http receiver enabled on port " + port);
+}
+
 
 // treat requests received either by messenger or POST http
 async function treatIncomingRequest(objRequest, handle){
+	if (!my_address)
+		return handle({ error: "I'm not initialized yet" });
+
 	if (objRequest.timestamp < (Date.now() - REQUEST_TIMEOUT / 2))
 		return handle({ error: "Timestamp too old, check system time" });
 	
@@ -209,9 +215,9 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 
 function treatPaymentFromPeer(params, handle){
 
-	verifyPaymentPackage(params.signed_package, function(error, payment_amount, asset, aa_address){
-		if (error)
-			return handle(error);
+	verifyPaymentPackage(params.signed_package, function(verification_error, payment_amount, asset, aa_address){
+		if (verification_error)
+			return handle(verification_error);
 		eventBus.emit("payment_received", payment_amount, asset, params.message, aa_address);
 		if (paymentReceivedCallback){
 			paymentReceivedCallback(payment_amount, asset, params.message, aa_address, function(cb_error, response){
@@ -386,7 +392,7 @@ async function getChannelsForPeer(peer, asset, handle){
 			return handle("no channel opened with this peer address for this asset");
 		return handle(null, rows.map(function(row){return row.aa_address}));
 	} else {
-		return ("peer should be a pairing address, an url or a peer address");
+		return handle("peer should be a pairing address, an url or a peer address");
 	}
 }
 
@@ -934,3 +940,4 @@ exports.getBalancesAndStatus = getBalancesAndStatus;
 exports.verifyPaymentPackage = verifyPaymentPackage;
 exports.getPaymentPackage = getPaymentPackage;
 exports.getChannelsForPeer = getChannelsForPeer;
+exports.startHttpServer = startHttpServer;
