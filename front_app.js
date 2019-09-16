@@ -171,7 +171,8 @@ async function treatIncomingRequest(objRequest, handle){
 
 async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
-	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second ? Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second : 0;
+	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second ? 
+	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second : 0;
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
 	const bHasBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel === 1});
@@ -411,8 +412,6 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		options.timeout = conf.defaultTimeoutInSecond;
 	if (!validationUtils.isPositiveInteger(options.timeout))
 		return handle("timeout must be a positive integer");
-	if (options.asset && !validationUtils.isValidBase64(options.asset,44))
-		return handle("asset is not valid");
 	if (!options.asset && initial_amount <= 1e4)
 		return handle("initial_amount must be > 1e4");
 	if (options.auto_refill_threshold && !validationUtils.isPositiveInteger(options.auto_refill_threshold))
@@ -425,6 +424,9 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		return handle("Salt must be 50 char max");
 
 	const asset = options.asset || 'base';
+	if (asset != 'base' && !validationUtils.isValidBase64(asset,44))
+		return handle("asset is not valid");
+
 
 	if (validationUtils.isNonemptyString(options.salt))
 		var salt = options.salt;
