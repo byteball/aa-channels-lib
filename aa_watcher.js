@@ -499,6 +499,8 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				console.log("error when closing channel " + error);
+			else
+				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
 			unlock();
 		});
 	});
