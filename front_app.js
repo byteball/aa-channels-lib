@@ -26,7 +26,7 @@ if (!conf.isHighAvailabilityNode){
 
 if (conf.enabledReceivers && conf.enabledReceivers.includes('obyte-messenger') && conf.isHighAvailabilityNode)
 	throw Error("Cannot use obyte-messenger layer as high avaibility node");
-if (!validationUtils.isPositiveInteger(conf.minChannelTimeoutInSecond) || !validationUtils.isPositiveInteger(conf.maxChannelTimeoutInSecond))
+if (conf.minChannelTimeoutInSecond && !validationUtils.isPositiveInteger(conf.minChannelTimeoutInSecond) || conf.maxChannelTimeoutInSecond && !validationUtils.isPositiveInteger(conf.maxChannelTimeoutInSecond))
 	throw Error("minChannelTimeoutInSecond and maxChannelTimeoutInSecond in conf.js must be postive integer");
 
 var paymentReceivedCallback;
@@ -242,8 +242,12 @@ if (objParams.salt && objParams.salt.length > 50)
 	return handle("Salt must be 50 char max");
 if (!validationUtils.isPositiveInteger(objParams.timeout))
 	return handle("Channel timeout must be positive integer");
+if (!conf.maxChannelTimeoutInSecond)
+	return handle("no maxChannelTimeoutInSecond configured");
 if (objParams.timeout > conf.maxChannelTimeoutInSecond)
 	return handle(`Channel timeout is too high, max acceptable: ${conf.maxChannelTimeoutInSecond} seconds`);
+if (!conf.minChannelTimeoutInSecond)
+	return handle("no minChannelTimeoutInSecond configured");
 if (objParams.timeout < conf.minChannelTimeoutInSecond)
 	return handle(`Channel timeout is too low, min acceptable: ${conf.minChannelTimeoutInSecond} seconds`);
 if (!validationUtils.isValidAddress(objParams.address))
