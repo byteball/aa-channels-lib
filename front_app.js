@@ -157,7 +157,7 @@ async function treatIncomingRequest(objRequest, handle){
 			getUnconfirmedSpendableAmountForChannel(appDB, channels[0], objRequest.params.aa_address, function(error, allowed_unconfirmed_amount){
 				if (error)
 					return handle({ error: error });
-				else if (allowed_unconfirmed_amount > 0)
+				else if (allowed_unconfirmed_amount > 0 || channels[0].amount_spent_by_me > 0)
 					return handle({ response: true });
 				else
 					return handle({ response: false });
@@ -192,8 +192,7 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 			unconfirmedDeposit += row.amount;
 	})
 
-	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel || !conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset])
-		return handle(null, objChannel.amount_spent_by_me); // if unconfirmed max amount are not configured, only amount_spent_by_me can be spent by peer
+
 
 	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
 
@@ -211,7 +210,7 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 	
 	const maxUnconfirmedSpendable = Math.min(unconfirmedSpendableByAsset,unconfirmedSpendableByChannel, unconfirmedDeposit);
 
-	return handle(null, Math.max(objChannel.amount_spent_by_me, maxUnconfirmedSpendable));
+	return handle(null, maxUnconfirmedSpendable);
 }
 
 function treatPaymentFromPeer(params, handle){
