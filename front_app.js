@@ -392,7 +392,7 @@ async function getChannelsForPeer(peer, asset, handle){
 			return handle("no channel opened with this peer url for this asset");
 		return handle(null, rows.map(function(row){return row.aa_address}));
 	} else if (validationUtils.isValidAddress(peer)){
-		const rows = await appDB.query("SELECT aa_address FROM channels WHERE peer=? AND asset=?",[peer, asset]);
+		const rows = await appDB.query("SELECT aa_address FROM channels WHERE peer_address=? AND asset=?",[peer, asset]);
 		if (rows.length === 0)
 			return handle("no channel opened with this peer address for this asset");
 		return handle(null, rows.map(function(row){return row.aa_address}));
