@@ -329,7 +329,7 @@ function deposit(aa_address, amount, handle){
 		return handle("amount must be positive integer");
 
 	mutex.lock([aa_address], async function(unlock){
-		const channels = await appDB.query("SELECT status,asset FROM channels WHERE aa_address=?", [aa_address]);
+		const channels = await appDB.query("SELECT status,asset,is_definition_confirmed FROM channels WHERE aa_address=?", [aa_address]);
 		if (channels.length != 1){
 			unlock();
 			return handle("unknown channel");
@@ -340,6 +340,12 @@ function deposit(aa_address, amount, handle){
 			unlock();
 			return handle("amount must be > 1e4");
 		}
+
+		if (channel.is_definition_confirmed != 1){
+			unlock();
+			return handle("aa address definition not confirmed, no deposit possible");
+		}
+
 		if (channel.status != "open" && channel.status != "closed" && channel.status != "created"){
 			unlock();
 			return handle("channel status: " + channel.status + ", no deposit possible");
@@ -521,7 +527,8 @@ async function createChannelAndSendDefinitionAndDeposit(initial_amount, arrDefin
 	else {
 		sendDefinitionAndDepositToChannel(aa_address, arrDefinition, initial_amount, asset).then(() => {
 			return handle(null, aa_address);
-		}, (error) => {
+		}, async (error) => {
+			await appDB.query("DELETE FROM channels WHERE aa_address=?",[aa_address]);
 			return handle(error);
 		});
 	}
@@ -770,7 +777,7 @@ function getPaymentPackage(payment_amount, aa_address, handle){
 		const objPackage = { 
 			payment_amount: payment_amount, 
 			amount_spent: (payment_amount + channel.amount_spent_by_me), 
-			period: channel.status == 'closed' || channel.status == 'created' ? channel.period + 1 : channel.period, // if channel is created or closed, payment package is created for next period
+			period: channel.status == 'closed' ? channel.period + 1 : channel.period, // if channel is created or closed, payment package is created for next period
 			aa_address: aa_address 
 		};
 		if (channel.is_known_by_peer === 0) { // if channel is not known by peer, we add the parameters allowing him to save it on this side
