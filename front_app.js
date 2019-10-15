@@ -44,22 +44,29 @@ if (!conf.isHighAvailabilityNode){ // if another node is used as watcher, it is 
 }
 
 if (conf.isHighAvailabilityNode){
-	setTimeout(init, 1000);
+	init();
 
 } else {
 	eventBus.once('headless_wallet_ready', function(){
-		setTimeout(init, 1000);
+		init();
 	});
 }
 
-async function init(){
+async function init(retryIndex){
+	if (!retryIndex)
+		retryIndex = 0;
+	if (retryIndex > 3)
+		throw Error("my_address is not defined in app DB, perhaps the cause is that you've never started the watcher node");
 
 	const results = await appDB.query("SELECT my_address FROM channels_config");
 
 	if (results[0])
 		my_address = results[0].my_address;
-	else
-		throw Error("my_address is not defined in app DB, perhaps the cause is that you've never started the watcher node");
+	else {
+		setTimeout(function(){
+			retry(retryIndex +1 );
+		}, 200);
+	}
 
 	//set up obyte-messenger receiver if enabled in conf
 	if (conf.enabledReceivers && conf.enabledReceivers.includes('obyte-messenger')){
@@ -83,8 +90,11 @@ async function init(){
 	if (conf.enabledReceivers && conf.enabledReceivers.includes('http') && conf.httpDefaultPort){
 		startHttpServer(conf.httpDefaultPort)
 	}
-	if (!conf.isHighAvailabilityNode)
+	if (!conf.isHighAvailabilityNode){
+		autoRefillChannels();
 		setInterval(autoRefillChannels, 30000);
+	}
+	eventBus.emit("aa_channels_ready");
 }
 
 function startHttpServer(port){
@@ -171,6 +181,9 @@ async function treatIncomingRequest(objRequest, handle){
 
 async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
+		return handle(null, 0);
+
 	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second ? 
 	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second : 0;
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
@@ -191,7 +204,6 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 		if (row.timestamp < maxValidTimestamp)
 			unconfirmedDeposit += row.amount;
 	})
-
 
 
 	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
@@ -814,7 +826,6 @@ function verifyPaymentPackage(objSignedPackage, handle){
 			return handle("amount_spent should be a positive integer");
 		if (!validationUtils.isPositiveInteger(objSignedMessage.payment_amount))
 			return handle("payment_amount should be a positive integer");
-
 		const channels = await appDB.query("SELECT peer_address FROM channels WHERE aa_address=?", [objSignedMessage.aa_address]);
 		if (!channels[0]){ //if channel is not known, we check channel parameters if provided and save channel
 			if (objSignedMessage.channel_parameters){
@@ -852,7 +863,7 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					}
 
 					if (conf.isHighAvailabilityNode){
-						const lockRows = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[objSignedMessage.aa_address]);
+						const lockRows = await conn.query("SELECT GET_LOCK(?,1) as my_lock",[objSignedMessage.aa_address]);
 						if (!lockRows[0].my_lock || lockRows[0].my_lock === 0)
 							return unlockAndHandle( "internal error");
 					}
