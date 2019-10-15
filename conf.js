@@ -18,7 +18,7 @@ exports.unconfirmedAmountsLimitsByAssetOrChannel = { // limits for accepting pay
 	"base" : {
 		max_unconfirmed_by_asset : 1e6,
 		max_unconfirmed_by_channel : 1e6,
-		minimum_time_in_second : 5
+		minimum_time_in_seconds : 5
 	}
 }
 

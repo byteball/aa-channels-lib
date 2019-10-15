@@ -20,12 +20,12 @@ exports.unconfirmedAmountsLimitsByAssetOrChannel = { // settings for accepting p
 	"base" : {
 		max_unconfirmed_by_asset : 1e6, // won't allow payment if current total unconfirmed over this amount
 		max_unconfirmed_by_channel : 1e6, // won't allow payment if total unconfirmed for a channel  is over this amount
-		minimum_time_in_second : 5 // won't allow payment if at least this time didn't elapse since peer's deposit
+		minimum_time_in_seconds : 5 // won't allow payment if at least this time didn't elapse since peer's deposit
 	},
 	"VVjz0rDamfpjpwlRUWoffMxu5gkl/3mGerXNHsNuV7Q=" : {
 		max_unconfirmed_by_asset : 10000,
 		max_unconfirmed_by_channel : 5000,
-		minimum_time_in_second : 2
+		minimum_time_in_seconds : 2
 	}
 }
 
@@ -193,7 +193,7 @@ function setMaxUnconfirmedByAssetAndChannel(asset, amount){
 
 }
 ```
-Override minimum_time_in_second setting from conf.js
+Override minimum_time_in_seconds setting from conf.js
 - **asset**: asset for which you want to set minimum time
 - **time**: minimum time to wait after deposit unit before accepting payment 
 

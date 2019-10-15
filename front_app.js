@@ -184,8 +184,8 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
 		return handle(null, 0);
 
-	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second ? 
-	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_second : 0;
+	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds ? 
+	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds : 0;
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
 	const bHasBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel === 1});
@@ -945,7 +945,7 @@ function setMinimumTimeToWaitForUnconfirmedPaymentByAsset(asset, time){
 	if (asset != 'base' &&	!validationUtils.isValidBase64(asset, 44))
 		return false;
 	initializeUnconfirmedAmountsLimitsByAssetOrChannel(asset);
-	conf.unconfirmedAmountsLimitsByAssetOrChannel[asset].minimum_time_in_second = time;
+	conf.unconfirmedAmountsLimitsByAssetOrChannel[asset].minimum_time_in_seconds = time;
 	return true;
 }
 
