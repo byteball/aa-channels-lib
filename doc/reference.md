@@ -134,9 +134,9 @@ channels.getBalancesAndStatus(aa_address, function(response){
   * free_amount: amount available for spending by you through channel
   * my_deposits: total amount you have deposited but it's not confirmed yet
 
-#### getPaymentPackage
+#### createPaymentPackage
 ```javascript
-channels.getPaymentPackage(payment_amount, aa_address, function(error, objSignedPackage){
+channels.createPaymentPackage(payment_amount, aa_address, function(error, objSignedPackage){
 
 });
 ```

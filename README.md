@@ -14,7 +14,7 @@ The communication between peers can be handled by the library, in this case two 
 - Encrypted chat: virtually no setup but has some latency, is not adapted for consequent volume of data and is hub-dependent.
 - HTTPS: a party that wants to receive payment has to setup an Nginx proxy but the communication is direct, very fast and the application can be infinitely scalable (see High Availability node)
 
-The communication can be external, all you need is a mean to transfer a payment package in JSON. The payment package is obtained with `getPaymentPackage` function and can be verified by receveir with `verifyPaymentPackage`.
+The communication can be external, all you need is a mean to transfer a payment package in JSON. The payment package is obtained with `createPaymentPackage` function and can be verified by receveir with `verifyPaymentPackage`.
 
 ## Basic example
 One peer initiates the creation with:
@@ -138,7 +138,7 @@ exports.httpDefaultPort = 6800;
 ```javascript
 exports.enabledReceivers = [];
 ```
-Create channel with `createNewChannel` using peer's payment address as first parameter, obtain payment packages with `getPaymentPackage` and verify them with `verifyPaymentPackage`.
+Create channel with `createNewChannel` using peer's payment address as first parameter, obtain payment packages with `createPaymentPackage` and verify them with `verifyPaymentPackage`.
 </details>
 
 <details><summary>High Avaibility mode</summary>

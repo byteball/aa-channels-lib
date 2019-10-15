@@ -13,7 +13,7 @@ rpcify.expose(frontApp.sendMessageAndPay);
 rpcify.expose(frontApp.close);
 rpcify.expose(frontApp.getBalancesAndStatus);
 rpcify.expose(frontApp.verifyPaymentPackage);
-rpcify.expose(frontApp.getPaymentPackage);
+rpcify.expose(frontApp.createPaymentPackage);
 
 rpcify.exposeEvent(eventBus, "my_deposit_became_stable");
 rpcify.exposeEvent(eventBus, "peer_deposit_became_stable");

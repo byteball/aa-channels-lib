@@ -571,7 +571,7 @@ function sendMessageAndPay(aa_address, message, payment_amount, handle){
 	if (conf.isHighAvailabilityNode)
 		return handle("high availability node can only receive payment");
 
-	getPaymentPackage(payment_amount, aa_address, function(error, objSignedPackage, peer, comLayer){
+	createPaymentPackage(payment_amount, aa_address, function(error, objSignedPackage, peer, comLayer){
 		if (error)
 			return handle(error);
 
@@ -725,7 +725,7 @@ async function getBalancesAndStatus(aa_address, handle){
 
 }
 
-function getPaymentPackage(payment_amount, aa_address, handle){
+function createPaymentPackage(payment_amount, aa_address, handle){
 
 	if (!my_address)
 		return handle("not initialized");
@@ -961,6 +961,6 @@ exports.close = close;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
 exports.getBalancesAndStatus = getBalancesAndStatus;
 exports.verifyPaymentPackage = verifyPaymentPackage;
-exports.getPaymentPackage = getPaymentPackage;
+exports.createPaymentPackage = createPaymentPackage;
 exports.getChannelsForPeer = getChannelsForPeer;
 exports.startHttpServer = startHttpServer;
