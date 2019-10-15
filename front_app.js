@@ -164,7 +164,7 @@ async function treatIncomingRequest(objRequest, handle){
 		if (channels[0].status == "open")
 			return handle({ response: true });
 		else if (channels[0].status == "created" || channels[0].status == "closed"){
-			getUnconfirmedSpendableAmountForChannel(appDB, channels[0], objRequest.params.aa_address, function(error, allowed_unconfirmed_amount){
+			checkUnconfirmedStateAndGetSpendableAmountForChannel(appDB, channels[0], objRequest.params.aa_address, function(error, allowed_unconfirmed_amount){
 				if (error)
 					return handle({ error: error });
 				else if (allowed_unconfirmed_amount > 0 || channels[0].amount_spent_by_me > 0)
@@ -179,10 +179,7 @@ async function treatIncomingRequest(objRequest, handle){
 }
 
 
-async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_address, handle){
-
-	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
-		return handle(null, 0);
+async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
 	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds ? 
 	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds : 0;
@@ -205,6 +202,8 @@ async function getUnconfirmedSpendableAmountForChannel(conn, objChannel, aa_addr
 			unconfirmedDeposit += row.amount;
 	})
 
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
+		return handle(null, 0);
 
 	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
 
@@ -881,7 +880,7 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					if (channel.status == 'closed' && (channel.period +1) != objSignedMessage.period)
 						return unlockAndHandle( "wrong period");
 
-					getUnconfirmedSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
+					checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
 						if (error)
 							return unlockAndHandle( error);
 
