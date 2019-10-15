@@ -63,8 +63,8 @@ async function init(retryIndex){
 	if (results[0])
 		my_address = results[0].my_address;
 	else {
-		setTimeout(function(){
-			retry(retryIndex +1 );
+		return setTimeout(function(){
+			init(retryIndex +1);
 		}, 200);
 	}
 
