@@ -191,8 +191,11 @@ async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objCha
 
 	if (bHasBeenClosed)
 		return handle( "channel in unconfirmed closing state");
-	if (!bHasDefinition)
-		return handle( "AA definition was not published");
+	if (!bHasDefinition){
+		const myDepositsRows = await conn.query("SELECT 1 FROM my_deposits WHERE aa_address=?",[aa_address]);
+		if (myDepositsRows.length === 0) // if we find a deposit, then channel was created by us and we are sure definition has been broadcast
+			return handle( "AA definition was not published");
+	}
 	if (bHasBadSequence)
 		return handle( "bad sequence unit from peer");
 
