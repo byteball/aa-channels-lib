@@ -14,7 +14,7 @@ exports.control_addresses = [''];
 
 exports.minChannelTimeoutInSeconds = 600;  // timeout value under which channel creation request will be refused
 exports.maxChannelTimeoutInSeconds = 1000; // timeout value above which channel creation request will be refused
-exports.defaultTimeoutInSecond = 600;. // default timeout value for channels created by me
+exports.defaultTimeoutInSeconds = 600;. // default timeout value for channels created by me
 
 exports.unconfirmedAmountsLimitsByAssetOrChannel = { // settings for accepting payments backed by unconfirmed channel and/or deposit
 	"base" : {

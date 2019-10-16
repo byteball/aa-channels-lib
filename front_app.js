@@ -432,7 +432,7 @@ async function createNewChannel(peer, initial_amount, options, handle){
 	if (!validationUtils.isPositiveInteger(initial_amount))
 		return handle("amount must be positive integer");
 	if (!options.timeout)
-		options.timeout = conf.defaultTimeoutInSecond;
+		options.timeout = conf.defaultTimeoutInSeconds;
 	if (!validationUtils.isPositiveInteger(options.timeout))
 		return handle("timeout must be a positive integer");
 	if (!options.asset && initial_amount <= 1e4)
