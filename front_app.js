@@ -291,9 +291,12 @@ function setCallBackForPaymentReceived(_cb){
 
 async function close(aa_address, handle){
 	if (!conf.isHighAvailabilityNode){
+		mutex.lock([aa_address], async function(unlock){
 		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer, status FROM channels WHERE aa_address=?", [aa_address]);
-		if (channels.length === 0)
+		if (channels.length === 0){
+			unlock();
 			return handle("unknown AA address");
+		}
 		const channel = channels[0];
 
 		const payload = { 
@@ -317,13 +320,17 @@ async function close(aa_address, handle){
 		}
 
 		headlessWallet.sendMultiPayment(options, async function(error, unit){
-			if (error)
+			if (error){
+				unlock();
 				handle("error when closing channel " + error);
+			}
 			else{
 				await appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open' OR status='created')", [aa_address]);
+				unlock();
 				handle(null);
 			}
 		});
+	})
 
 	} else {
 		//order aa watcher to close channel
@@ -652,6 +659,7 @@ function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 
 function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_amount, asset){
 	return new Promise(async (resolve, reject) => {
+		console.error("sendDefinitionAndDepositToChannel");
 		const payload = { address: aa_address, definition: arrDefinition };
 
 		const options = {

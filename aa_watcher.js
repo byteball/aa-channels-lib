@@ -81,8 +81,7 @@ async function deletePendingUnconfirmedUnits(){
 	const sqlFilter = mciAndUnitsRows.map(function(row){
 		return "(unit='" + row.unit + "' AND last_updated_mci>="+ row.main_chain_index+")";
 	}).join(" OR ");
-	appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit IN (\n\
-		SELECT unit FROM unconfirmed_units_from_peer INNER JOIN channels USING (aa_address) WHERE " + sqlFilter +")");
+	appDB.query("DELETE FROM unconfirmed_units_from_peer INNER JOIN channels USING (aa_address) WHERE " + sqlFilter);
 }
 
 async function updateAddressesToWatch(){
@@ -181,32 +180,32 @@ function treatNewOutputsToChannels(channels, new_unit){
 	return new Promise(async (resolve) => {
 		async.eachSeries(channels, function(channel, eachCb){
 			mutex.lock([channel.aa_address], async function(unlock_aa){
-				var conn = await takeAppDbConnectionPromise();
+				var connAppDb = await takeAppDbConnectionPromise();
 				if (conf.isHighAvailabilityNode) {
-					var connOrDagDB = dagDB;
-					var results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
+					var connAppDbOrDagDb = dagDB;
+					var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
 					if (!results[0].my_lock || results[0].my_lock === 0){
-						 conn.release();
+						 connAppDb.release();
 						 unlock_aa();
 						 eachCb();
 						return console.log("couldn't get lock from MySQL " + new_unit.author_address);
 					}
 				} else{
-					var connOrDagDB = conn;
+					var connAppDbOrDagDb = connAppDb;
 				}
-				var lockedChannelRows = await conn.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
+				var lockedChannelRows = await connAppDb.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
 				var lockedChannel = lockedChannelRows[0];
-				var byteAmountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
+				var byteAmountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
 				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
 					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset='"+lockedChannel.asset +"' ";
-					var amountRows = await connOrDagDB.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
+					var amountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
 					var bHasDefinition = false;
 					var bHasData = false;
 
-					var joint = await getJointFromCacheStorageOrHub(connOrDagDB, new_unit.unit);
+					var joint = await getJointFromCacheStorageOrHub(connAppDbOrDagDb, new_unit.unit);
 					if (joint){
 						joint.messages.forEach(function(message){
 							if (message.app == "definition" && message.payload.address == channel.aa_address){
@@ -217,23 +216,23 @@ function treatNewOutputsToChannels(channels, new_unit){
 						});
 						// for this 3 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
 						if (lockedChannel.status == "created" || lockedChannel.status == "closed"|| lockedChannel.status == "open"){
-							var unconfirmedUnitsRows = await conn.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
+							var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
 							var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
 							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){ // we ignore unit if a closing request happened or no pending/confirmed definition is known
 								var timestamp = Math.round(Date.now() / 1000);
 								if (bHasData) // a deposit shouldn't have data, if it has data we consider it's a closing request and we flag it as so
-									await conn.query("INSERT  " + conn.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
+									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
 									[ channel.aa_address,new_unit.unit, timestamp]);
 								else if (lockedChannel.asset != 'base' || byteAmount > 10000) // deposit in bytes are possible only over 10000
-									await conn.query("INSERT  " + conn.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
+									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
 									[ channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
 							}
 						}
 					}
 				}
 				if (conf.isHighAvailabilityNode)
-					await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
-				conn.release();
+					await	connAppDb.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
+				connAppDb.release();
 				unlock_aa();
 				eachCb();
 			});
@@ -330,26 +329,26 @@ function treatUnitsFromAA(arrUnits){
 function treatUnitFromAA(new_unit){
 	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
-			var conn = await takeAppDbConnectionPromise();
+			var connAppDb = await takeAppDbConnectionPromise();
 			if (conf.isHighAvailabilityNode) {
-				var connOrDagDB = dagDB;
+				var connAppDbOrDagDb = dagDB;
 
-				var results = await	conn.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
+				var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
 				if (!results[0].my_lock || results[0].my_lock === 0){
 					unlock_aa();
-					conn.release();
+					connAppDb.release();
 					console.log("couldn't get lock from MySQL for " + new_unit.author_address);
 					return resolve();
 				}
 			} else{
-				var connOrDagDB = conn;
+				var connAppDbOrDagDb = connAppDb;
 			}
-			var channels = await conn.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
+			var channels = await connAppDb.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
 			if (!channels[0])
 				throw Error("channel not found");
 			var channel = channels[0];
 
-			var payloads = await connOrDagDB.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
+			var payloads = await connAppDbOrDagDb.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
 			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : {};
 
 			function setLastUpdatedMciAndEventIdAndOtherFields(fields){
@@ -359,7 +358,7 @@ function treatUnitFromAA(new_unit){
 						for (var key in fields){
 							strSetFields += "," + key + "='" + fields[key] + "'";
 						}
-					await conn.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + "\n\
+					await connAppDb.query("UPDATE channels SET last_updated_mci=?,last_event_id=?,is_definition_confirmed=1" + strSetFields + "\n\
 					WHERE aa_address=? AND last_event_id<?", [new_unit.main_chain_index ? new_unit.main_chain_index : channel.last_updated_mci, payload.event_id, new_unit.author_address, payload.event_id]);
 					return resolve_2();
 				});
@@ -367,12 +366,12 @@ function treatUnitFromAA(new_unit){
 
 			//once AA state is updated by an unit, we delete the corresponding unit from unconfirmed units table
 			if (payload.trigger_unit){
-				await conn.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [payload.trigger_unit]);
+				await connAppDb.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [payload.trigger_unit]);
 				delete assocJointsFromPeersCache[payload.trigger_unit];
 			}
 			//channel is open and received funding
 			if (payload.open){
-				await conn.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
+				await connAppDb.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
 				await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
 				if (payload[my_address] > 0)
 					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
@@ -409,7 +408,7 @@ function treatUnitFromAA(new_unit){
 						amount_possibly_lost_by_me: 0,
 						last_message_from_peer: ''
 					});
-				const rows = await connOrDagDB.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
+				const rows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
 				if (payload.fraud_proof)
 					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
 				else
@@ -423,8 +422,8 @@ function treatUnitFromAA(new_unit){
 				await setLastUpdatedMciAndEventIdAndOtherFields({});
 			}
 			if (conf.isHighAvailabilityNode)
-				await	conn.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
-			conn.release();
+				await	connAppDb.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
+			connAppDb.release();
 			unlock_aa();
 			resolve();
 		});
@@ -433,44 +432,60 @@ function treatUnitFromAA(new_unit){
 
 // check if frontend authored a closing request, used only in high availability mode
 function treatClosingRequests(){
-	mutex.lock(['treatClosingRequests'], async function(unlock){
-		const rows = await appDB.query("SELECT aa_address,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE closing_authored=1");
+	mutex.lockOrSkip(['treatClosingRequests'], async function(unlock){
+		const rows = await appDB.query("SELECT status,aa_address,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE closing_authored=1");
 		if (rows.length === 0)
 			return unlock();
-
 		async.eachSeries(rows, function(row, cb){
-
-			const payload = { close: 1, period: row.period };
-			if (row.amount_spent_by_me > 0)
-				payload.transferredFromMe = row.amount_spent_by_me;
-			if (row.amount_spent_by_peer > 0)
-				payload.sentByPeer = JSON.parse(row.last_message_from_peer);
-
-			const options = {
-				messages: [{
-					app: 'data',
-					payload_location: "inline",
-					payload_hash: objectHash.getBase64Hash(payload),
-					payload: payload
-				}],
-				change_address: my_address,
-				base_outputs: [{ address: row.aa_address, amount: 10000 }]
-			}
-	
-			headlessWallet.sendMultiPayment(options, async function(error, unit){
-				if (error)
-					handle("error when closing channel " + error);
-				else{
-					await appDB.query("UPDATE channels SET closing_authored=0 WHERE aa_address=?", [row.aa_address]);
-					await appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open' OR status='created')", [row.aa_address]);
-				}
-				cb();
-			});
+			closeUnderLock(row,cb);
 		},
-			function(){
-				unlock();
-			});
+		unlock
+		);
+	});
+}
 
+async function closeUnderLock(row, cb){
+	if (!conf.isHighAvailabilityNode)
+		throw Error("closing request not in high availability mode");
+
+	var connAppDB = await takeAppDbConnectionPromise();
+	var results = await	connAppDB.query("SELECT GET_LOCK(?,1) as my_lock",[row.aa_address]);
+	if (!results[0].my_lock || results[0].my_lock === 0){
+		connAppDB.release();
+		cb();
+		return console.log("couldn't get lock from MySQL " + row.aa_address);
+	}
+
+	const payload = {
+		close: 1, 
+		period: row.status == 'closed' || row.status == 'created' ? row.period + 1 : row.period
+	};
+	if (row.amount_spent_by_me > 0)
+		payload.transferredFromMe = row.amount_spent_by_me;
+	if (row.amount_spent_by_peer > 0)
+		payload.sentByPeer = JSON.parse(row.last_message_from_peer);
+
+	const options = {
+		messages: [{
+			app: 'data',
+			payload_location: "inline",
+			payload_hash: objectHash.getBase64Hash(payload),
+			payload: payload
+		}],
+		change_address: my_address,
+		base_outputs: [{ address: row.aa_address, amount: 10000 }]
+	}
+
+	headlessWallet.sendMultiPayment(options, async function(error, unit){
+		if (error)
+			console.log("error when closing channel " + error);
+		else{
+			await connAppDB.query("UPDATE channels SET closing_authored=0 WHERE aa_address=?", [row.aa_address]);
+			await connAppDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open' OR status='created')", [row.aa_address]);
+		}
+		await connAppDB.query("DO RELEASE_LOCK(?)",[row.aa_address]);
+		await connAppDB.release();
+		cb();
 	});
 }
 

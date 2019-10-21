@@ -2,7 +2,6 @@ exports.bServeAsHub = false;
 exports.bLight = true;
 exports.bSingleAddress = true; // should always be true!
 
-exports.WS_PROTOCOL = "ws://";
 exports.hub = process.env.testnet ? 'obyte.org/bb-test' : 'obyte.org/bb';
 exports.deviceName = 'AA-channel-lib';
 exports.permanent_pairing_secret = '0000';
