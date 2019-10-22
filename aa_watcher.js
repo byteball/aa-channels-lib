@@ -78,10 +78,9 @@ async function deletePendingUnconfirmedUnits(){
 	const mciAndUnitsRows = await dagDB.query("SELECT main_chain_index,unit FROM units WHERE unit IN ('"+ unconfirmedUnitsRows.map(function(row){ return row.unit }).join("','") + "') AND is_stable=1");
 	if (mciAndUnitsRows.length === 0)
 		return;
-	const sqlFilter = mciAndUnitsRows.map(function(row){
-		return "(unit='" + row.unit + "' AND last_updated_mci>="+ row.main_chain_index+")";
-	}).join(" OR ");
-	appDB.query("DELETE FROM unconfirmed_units_from_peer INNER JOIN channels USING (aa_address) WHERE " + sqlFilter);
+	mciAndUnitsRows.forEach(function(row){
+		appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=? AND unit IN (SELECT unit FROM channels where last_updated_mci>=?)",[row.unit, row.main_chain_index]);
+	});
 }
 
 async function updateAddressesToWatch(){
