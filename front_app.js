@@ -155,12 +155,12 @@ async function treatIncomingRequest(objRequest, handle){
 	// peer asks if a channel is ready to use, response depends of the known confirmed status and unconfirmed channels handling options 
 	if (objRequest.command == 'is_ready'){
 		if (typeof objRequest.params != "object")
-			return handle({ error: "No params" });
+			return handle({ response: false, error: "No params" });
 		if (!validationUtils.isValidAddress(objRequest.params.aa_address))
 			return handle({ error: "Invalid aa address" });
 		const channels = await appDB.query("SELECT status,asset,is_definition_confirmed,amount_spent_by_me FROM channels WHERE aa_address=?", [objRequest.params.aa_address]);
 		if (channels.length === 0)
-			return handle({ error: "aa address not known" });
+			return handle({ response: false, error: "aa address not known" });
 		if (channels[0].status == "open")
 			return handle({ response: true });
 		else if (channels[0].status == "created" || channels[0].status == "closed"){
@@ -170,11 +170,11 @@ async function treatIncomingRequest(objRequest, handle){
 				else if (allowed_unconfirmed_amount > 0 || channels[0].amount_spent_by_me > 0)
 					return handle({ response: true });
 				else
-					return handle({ response: false });
+					return handle({ response: false, error: "not ready, no spendable unconfirmed funds" });
 			})
 		}
 		else
-			return handle({ response: false });
+			return handle({ response: false, error: "not ready, channel status: " +  channels[0].status });
 	}
 }
 
@@ -564,12 +564,18 @@ function askIfChannelReady(comLayer, peer, aa_address){
 				aa_address: aa_address
 			}
 		}
-		const responseCb = async function(responseFromPeer){
-			return resolve(!!responseFromPeer.response);
+		const responseCb = async function(objResponseFromPeer){
+			if (typeof objResponseFromPeer != "object")
+				return resolve({ response: false, error: "bad response from peer, not an object" });
+			if (objResponseFromPeer.response && typeof objResponseFromPeer.response != "boolean")
+				return resolve({ response: false, error: "bad response from peer, response is not a boolean" });
+			if (objResponseFromPeer.error && !validationUtils.isNonemptyString(objResponseFromPeer.error))
+				return resolve({ response: false, error: "bad response from peer, error is not a string" });
+			return resolve(objResponseFromPeer);
 		}
 
 		const timeOutCb = function(){
-			return resolve(false);
+			return resolve({ response: false, error: "timeout, peer didn't respond" });
 		};
 		sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb);
 	});
@@ -786,12 +792,12 @@ function createPaymentPackage(payment_amount, aa_address, handle){
 			comLayer = channel.peer_device_address ? "obyte-messenger" : "http";
 
 			if (channel.is_peer_ready === 0){
-				if (await askIfChannelReady(comLayer, peer, aa_address))
+				const objResponseFromPeer = await askIfChannelReady(comLayer, peer, aa_address);
+				if (objResponseFromPeer.response)
 					await appDB.query("UPDATE channels SET is_peer_ready=1,is_known_by_peer=1 WHERE aa_address=?", [aa_address]);
 				else
-					return unlockAndHandle("Channel is not open for peer or he didn't respond");
+					return unlockAndHandle("Peer is not ready: " + objResponseFromPeer.error);
 			}
-
 		}
 		
 		await appDB.query("UPDATE channels SET amount_spent_by_me=amount_spent_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
@@ -899,10 +905,10 @@ function verifyPaymentPackage(objSignedPackage, handle){
 						const peer_credit = delta_amount_spent + channel.overpayment_from_peer;
 
 						if (objSignedMessage.amount_spent > (amount_deposited_by_peer + unconfirmed_amount + channel.amount_spent_by_me))
-							return unlockAndHandle( "AA not funded enough");
+							return unlockAndHandle( "AA not funded enough.");
 
 						if (payment_amount > (peer_credit + unconfirmed_amount))
-							return unlockAndHandle( "Payment amount is over your available credit");
+							return unlockAndHandle( "Payment amount is over your available credit.");
 		
 						await conn.query("UPDATE channels SET amount_spent_by_peer=amount_spent_by_peer+?,last_message_from_peer=?,overpayment_from_peer=?,is_known_by_peer=1\n\
 						WHERE aa_address=?", [delta_amount_spent, JSON.stringify(objSignedPackage), peer_credit - payment_amount, channel.aa_address]);
