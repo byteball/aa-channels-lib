@@ -125,24 +125,27 @@ async function updateAddressesToWatch(){
 
 async function getSqlFilterForNewUnitsFromChannels(){
 	return new Promise(async (resolve) => {
-		const rows = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
-		if (rows.length === 0)
+		const rowsAddresses = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
+		if (rowsAddresses.length === 0)
 			return resolve(" 0 ");
-		var string = "(" + rows.map(function(row){
-			return " (author_address='" + row.aa_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
-		}).join(' OR ') +")";
+
+		const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
+		const string = " author_address IN ('" + rowsAddresses.map(function(row){return row.aa_address}).join("','") + "') " 
+		+ "AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
 		resolve(string);
 	});
 }
 
 async function getSqlFilterForNewUnitsFromPeers(aa_address){
 	return new Promise(async (resolve) => {
-		const rows = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
-		if (rows.length === 0)
+		const rowsAddresses = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
+		if (rowsAddresses.length === 0)
 			return resolve(" 0 ");
-		var string = "(" +  rows.map(function(row){
-			return " (outputs.address='" + row.aa_address +"' AND author_address='" + row.peer_address + "' AND (main_chain_index>" + row.last_updated_mci + " OR main_chain_index IS NULL)) ";
-		}).join(' OR ') +")";
+
+		const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
+		var string = "outputs.address IN ('" +  rowsAddresses.map(function(row){return row.aa_address}).join("','") +"')" +
+		" AND author_address IN ('" +  rowsAddresses.map(function(row){return row.peer_address}).join("','") +"')" +
+		" AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
 		resolve(string);
 	});
 }
@@ -162,6 +165,7 @@ function treatNewUnitsToAA(arrUnits, aa_address){
 				console.log("nothing destinated to AA in these units");
 				return resolve();
 			}
+			console.log(new_units.length + " destinated to AA to be treated");
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
 				var channels = await appDB.query("SELECT aa_address FROM channels WHERE peer_address=?", [new_unit.author_address]);
@@ -182,12 +186,12 @@ function treatNewOutputsToChannels(channels, new_unit){
 				var connAppDb = await takeAppDbConnectionPromise();
 				if (conf.isHighAvailabilityNode) {
 					var connAppDbOrDagDb = dagDB;
-					var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
+					var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[channel.aa_address]);
 					if (!results[0].my_lock || results[0].my_lock === 0){
 						 connAppDb.release();
 						 unlock_aa();
 						 eachCb();
-						return console.log("couldn't get lock from MySQL " + new_unit.author_address);
+						return console.log("couldn't get lock from MySQL " + channel.aa_address);
 					}
 				} else{
 					var connAppDbOrDagDb = connAppDb;
@@ -196,7 +200,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 				var lockedChannel = lockedChannelRows[0];
 				var byteAmountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
-				if (byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
+				if (lockedChannel.peer_address == new_unit.author_address && byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
 					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset='"+lockedChannel.asset +"' ";
 					var amountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
@@ -313,7 +317,7 @@ function treatUnitsFromAA(arrUnits){
 				console.log("nothing concerns payment channel in these units");
 				return resolve_1();
 			}
-
+			console.log(new_units.length + " new_units from AA to be treated");
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
 				await treatUnitFromAA(new_unit);

@@ -28,7 +28,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	is_definition_confirmed TINYINT DEFAULT 0,\n\
 	closing_authored TINYINT DEFAULT 0,\n\
 	status VARCHAR(30) DEFAULT 'created',\n\
-	last_updated_mci INTEGER DEFAULT 0,\n\
+	last_updated_mci INTEGER DEFAULT NULL,\n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE KEY bySaltAndPeerAddressUnit(peer_address, salt)\n\
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;"); 
