@@ -216,7 +216,6 @@ async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objCha
 	});
 
 	const unconfirmedSpentByChannelRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE aa_address=?",[aa_address]);
-
 	const unconfirmedSpentByChannel = unconfirmedSpentByChannelRows[0] ? Math.max(unconfirmedSpentByChannelRows[0].amount, 0) : 0;
 
 	const unconfirmedSpendableByAsset = Math.max(conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].max_unconfirmed_by_asset - unconfirmedSpentByAsset, 0);
@@ -714,9 +713,9 @@ function autoRefillChannels(){
 					return cb();
 				}
 			});
-		}, function(){
-			unlock();
-		});
+		}, 
+			unlock
+		);
 	});
 }
 

@@ -52,7 +52,7 @@ if (conf.bLight){
 eventBus.on('new_my_transactions', function(arrUnits){
 	if(conf.bLight && !lightWallet.isFirstHistoryReceived()) // we ignore all new transactions that could come from a node resyncing from scratch - to do: find solution for full node
 		return console.log("first history not processed");
-	treatNewUnitsToAA(arrUnits);
+	treatUnconfirmedUnitsToAA(arrUnits);
 });
 
 eventBus.on('sequence_became_bad', function(arrUnits){
@@ -83,6 +83,7 @@ async function deletePendingUnconfirmedUnits(){
 	});
 }
 
+// we compare the list of currently watched addresses with the list of channels addresses, and watch those not watched yet
 async function updateAddressesToWatch(){
 	var watched_addresses = (await dagDB.query("SELECT address FROM my_watched_addresses")).map(function(row){ return row.address }).join("','");
 	var rows = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses + "')");
@@ -115,7 +116,7 @@ async function updateAddressesToWatch(){
 
 		async function treatUnitsAndAddWatchedAddress(){
 			await treatUnitsFromAA(); // we treat units from AA first to get more recent confirmed states
-			await treatNewUnitsToAA(null, row.aa_address); 
+			await treatUnconfirmedUnitsToAA(null, row.aa_address); 
 			walletGeneral.addWatchedAddress(row.aa_address, () => {
 			});
 		}
@@ -124,36 +125,30 @@ async function updateAddressesToWatch(){
 
 
 async function getSqlFilterForNewUnitsFromChannels(){
-	return new Promise(async (resolve) => {
-		const rowsAddresses = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
-		if (rowsAddresses.length === 0)
-			return resolve(" 0 ");
+	const rowsAddresses = await appDB.query("SELECT last_updated_mci,aa_address FROM channels");
+	if (rowsAddresses.length === 0)
+		return " 0 ";
 
-		const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
-		const string = " author_address IN ('" + rowsAddresses.map(function(row){return row.aa_address}).join("','") + "') " 
-		+ "AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
-		resolve(string);
-	});
+	const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
+	return " author_address IN ('" + rowsAddresses.map(function(row){return row.aa_address}).join("','") + "') " 
+	+ "AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
 }
 
 async function getSqlFilterForNewUnitsFromPeers(aa_address){
-	return new Promise(async (resolve) => {
-		const rowsAddresses = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
-		if (rowsAddresses.length === 0)
-			return resolve(" 0 ");
+	const rowsAddresses = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
+	if (rowsAddresses.length === 0)
+		return " 0 ";
 
-		const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
-		var string = "outputs.address IN ('" +  rowsAddresses.map(function(row){return row.aa_address}).join("','") +"')" +
-		" AND author_address IN ('" +  rowsAddresses.map(function(row){return row.peer_address}).join("','") +"')" +
-		" AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
-		resolve(string);
-	});
+	const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
+	return "outputs.address IN ('" +  rowsAddresses.map(function(row){return row.aa_address}).join("','") +"')" +
+	" AND author_address IN ('" +  rowsAddresses.map(function(row){return row.peer_address}).join("','") +"')" +
+	" AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
 }
 
 
-function treatNewUnitsToAA(arrUnits, aa_address){
+function treatUnconfirmedUnitsToAA(arrUnits, aa_address){
 	return new Promise(async (resolve) => {
-		mutex.lock(['treatNewUnitsToAA'], async (unlock) => {
+		mutex.lock(['treatUnconfirmedUnitsToAA'], async (unlock) => {
 			const unitFilter = arrUnits ? " units.unit IN(" + arrUnits.map(dagDB.escape).join(',') + ") AND " : "";
 			// we select units having output address and author matching known channels
 			const new_units = await dagDB.query("SELECT DISTINCT timestamp,units.unit,main_chain_index,unit_authors.address AS author_address FROM units \n\
@@ -185,7 +180,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 			mutex.lock([channel.aa_address], async function(unlock_aa){
 				var connAppDb = await takeAppDbConnectionPromise();
 				if (conf.isHighAvailabilityNode) {
-					var connAppDbOrDagDb = dagDB;
+					var connDagDb = dagDB;
 					var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[channel.aa_address]);
 					if (!results[0].my_lock || results[0].my_lock === 0){
 						 connAppDb.release();
@@ -193,22 +188,22 @@ function treatNewOutputsToChannels(channels, new_unit){
 						 eachCb();
 						return console.log("couldn't get lock from MySQL " + channel.aa_address);
 					}
-				} else{
-					var connAppDbOrDagDb = connAppDb;
+				} else {
+					var connDagDb = connAppDb;
 				}
 				var lockedChannelRows = await connAppDb.query("SELECT * FROM channels WHERE aa_address=?", [channel.aa_address]);
 				var lockedChannel = lockedChannelRows[0];
-				var byteAmountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
+				var byteAmountRows = await connDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=? AND asset IS NULL", [new_unit.unit, channel.aa_address]);
 				var byteAmount = byteAmountRows[0] ? byteAmountRows[0].amount : 0;
 				if (lockedChannel.peer_address == new_unit.author_address && byteAmount >= constants.MIN_BYTES_BOUNCE_FEE){ // check the minimum to not be bounced is reached 
 					var sqlAsset = lockedChannel.asset == 'base' ? "" : " AND asset='"+lockedChannel.asset +"' ";
-					var amountRows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
+					var amountRows = await connDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
 					var bHasDefinition = false;
 					var bHasData = false;
 
-					var joint = await getJointFromCacheStorageOrHub(connAppDbOrDagDb, new_unit.unit);
+					var joint = await getJointFromCacheStorageOrHub(connDagDb, new_unit.unit);
 					if (joint){
 						joint.messages.forEach(function(message){
 							if (message.app == "definition" && message.payload.address == channel.aa_address){
@@ -334,7 +329,7 @@ function treatUnitFromAA(new_unit){
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
 			var connAppDb = await takeAppDbConnectionPromise();
 			if (conf.isHighAvailabilityNode) {
-				var connAppDbOrDagDb = dagDB;
+				var connDagDb = dagDB;
 
 				var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[new_unit.author_address]);
 				if (!results[0].my_lock || results[0].my_lock === 0){
@@ -343,15 +338,15 @@ function treatUnitFromAA(new_unit){
 					console.log("couldn't get lock from MySQL for " + new_unit.author_address);
 					return resolve();
 				}
-			} else{
-				var connAppDbOrDagDb = connAppDb;
+			} else {
+				var connDagDb = connAppDb;
 			}
 			var channels = await connAppDb.query("SELECT * FROM channels WHERE aa_address=?", [new_unit.author_address]);
 			if (!channels[0])
 				throw Error("channel not found");
 			var channel = channels[0];
 
-			var payloads = await connAppDbOrDagDb.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
+			var payloads = await connDagDb.query("SELECT payload FROM messages WHERE unit=? AND app='data' ORDER BY message_index ASC LIMIT 1", [new_unit.unit]);
 			var payload = payloads[0] ? JSON.parse(payloads[0].payload) : {};
 
 			function setLastUpdatedMciAndEventIdAndOtherFields(fields){
@@ -411,7 +406,7 @@ function treatUnitFromAA(new_unit){
 						amount_possibly_lost_by_me: 0,
 						last_message_from_peer: ''
 					});
-				const rows = await connAppDbOrDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
+				const rows = await connDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
 				if (payload.fraud_proof)
 					eventBus.emit("channel_closed_with_fraud_proof", new_unit.author_address, rows[0] ? rows[0].amount : 0);
 				else
