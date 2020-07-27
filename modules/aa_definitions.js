@@ -12,11 +12,11 @@ function getAaArrDefinition(addressA, addressB, timeout, asset, salt){
 		{
 			base_aa: BASE_AA,
 			params:	{
-				asset,
 				addressA,
 				addressB,
 				asset,
-				salt
+				salt,
+				timeout
 			}
 		}
 	]

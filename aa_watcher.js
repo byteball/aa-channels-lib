@@ -417,7 +417,7 @@ function treatUnitFromAA(new_unit){
 				const result = await appDB.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
 				if (result.affectedRows !== 0)
 					eventBus.emit("refused_deposit", payload.trigger_unit);
-				await setLastUpdatedMciAndEventIdAndOtherFields({});
+				//await setLastUpdatedMciAndEventIdAndOtherFields({});
 			}
 			if (conf.isHighAvailabilityNode)
 				await	connAppDb.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
