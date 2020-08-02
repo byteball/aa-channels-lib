@@ -5,6 +5,7 @@ const db = require('../modules/external_db.js');
 db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	aa_address CHAR(32) BINARY NOT NULL PRIMARY KEY, \n\
 	salt VARCHAR(50) DEFAULT NULL,\n\
+	version VARCHAR(4) NOT NULL,\n\
 	definition TEXT,\n\
 	asset CHAR(44) DEFAULT NULL,\n\
 	peer_address CHAR(32) NOT NULL, \n\

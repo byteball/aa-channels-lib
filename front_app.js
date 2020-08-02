@@ -248,32 +248,40 @@ function treatPaymentFromPeer(params, handle){
 
 function saveChannelCreatedByPeer(objParams, handle){
 
-if (objParams.salt && !validationUtils.isNonemptyString(objParams.salt))
-	return handle("Salt must be string");
-if (objParams.salt && objParams.salt.length > 50)
-	return handle("Salt must be 50 char max");
-if (!validationUtils.isPositiveInteger(objParams.timeout))
-	return handle("Channel timeout must be positive integer");
-if (!conf.maxChannelTimeoutInSeconds)
-	return handle("no maxChannelTimeoutInSeconds configured");
-if (objParams.timeout > conf.maxChannelTimeoutInSeconds)
-	return handle(`Channel timeout is too high, max acceptable: ${conf.maxChannelTimeoutInSeconds} seconds`);
-if (!conf.minChannelTimeoutInSeconds)
-	return handle("no minChannelTimeoutInSeconds configured");
-if (objParams.timeout < conf.minChannelTimeoutInSeconds)
-	return handle(`Channel timeout is too low, min acceptable: ${conf.minChannelTimeoutInSeconds} seconds`);
-if (!validationUtils.isValidAddress(objParams.address))
-	return handle("Invalid payment address");
-if (objParams.address == my_address)
-	return handle("this address is not yours");
-if (objParams.url && !isUrl(objParams.url))
-	return handle("Invalid url");
-if (objParams.asset != 'base' && !validationUtils.isValidBase64(objParams.asset, 44))
-	return handle("Invalid asset");
+	if (objParams.salt && !validationUtils.isNonemptyString(objParams.salt))
+		return handle("Salt must be string");
+	if (objParams.salt && objParams.salt.length > 50)
+		return handle("Salt must be 50 chars max");
+	if (!validationUtils.isPositiveInteger(objParams.timeout))
+		return handle("Channel timeout must be positive integer");
+	if (!conf.maxChannelTimeoutInSeconds)
+		return handle("no maxChannelTimeoutInSeconds configured");
+	if (objParams.timeout > conf.maxChannelTimeoutInSeconds)
+		return handle(`Channel timeout is too high, max acceptable: ${conf.maxChannelTimeoutInSeconds} seconds`);
+	if (!conf.minChannelTimeoutInSeconds)
+		return handle("no minChannelTimeoutInSeconds configured");
+	if (objParams.timeout < conf.minChannelTimeoutInSeconds)
+		return handle(`Channel timeout is too low, min acceptable: ${conf.minChannelTimeoutInSeconds} seconds`);
+	if (!validationUtils.isValidAddress(objParams.address))
+		return handle("Invalid payment address");
+	if (objParams.address == my_address)
+		return handle("this address is not yours");
+	if (objParams.url && !isUrl(objParams.url))
+		return handle("Invalid url");
+	if (objParams.asset != 'base' && !validationUtils.isValidBase64(objParams.asset, 44))
+		return handle("Invalid asset");
+	if (!validationUtils.isNonemptyString(objParams.version))
+		return handle("Invalid version");
+	if (objParams.version.length > 4)
+		return handle("Version must be 4 chars max");
+	if (!aaDefinitions.doesAaVersionExist(objParams.version))
+		return handle("Unknown AA version");
+	if (conf.supportedVersion && conf.supportedVersion.indexOf(objParams.version) == -1)
+		return handle("Unsupported AA version");
 
-	const aa_address = aaDefinitions.getAaAddress(my_address, objParams.address,objParams.timeout ,objParams.asset, objParams.salt);
-	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url,is_known_by_peer) VALUES (?,?,?,?,?,?,?,1)",
-	[objParams.asset, objParams.timeout, aa_address, objParams.salt, objParams.address, objParams.from_address, objParams.url], function(result){
+	const aa_address = aaDefinitions.getAaAddress(my_address, objParams.address,objParams.timeout ,objParams.asset, objParams.salt, objParams.version);
+	appDB.query("INSERT " + appDB.getIgnore() + " INTO channels (asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url,is_known_by_peer, version) VALUES (?,?,?,?,?,?,?,1,?)",
+	[objParams.asset, objParams.timeout, aa_address, objParams.salt, objParams.address, objParams.from_address, objParams.url, objParams.version], function(result){
 		if (result.affectedRows !== 1)
 			return handle("this salt already exists");
 		else {
@@ -427,8 +435,7 @@ async function getChannelsForPeer(peer, asset, handle){
 }
 
 
-async function createNewChannel(peer, initial_amount, options, handle){
-	options = options || {};
+async function createNewChannel(peer, initial_amount, options = {}, handle){
 	if (conf.isHighAvailabilityNode)
 		return handle("high availability node cannot create channel");
 	if (!my_address)
@@ -503,7 +510,8 @@ async function createNewChannel(peer, initial_amount, options, handle){
 		params: {
 			address: my_address,
 			timeout: options.timeout,
-			asset: asset
+			asset: asset,
+			version: aaDefinitions.getDefaultVersion()
 		}
 	}
 
@@ -539,9 +547,9 @@ async function createNewChannel(peer, initial_amount, options, handle){
 
 async function createChannelAndSendDefinitionAndDeposit(initial_amount, arrDefinition, auto_refill_threshold, auto_refill_amount, asset, timeout, aa_address, salt, peer_address, peer_device_address, peer_url, handle){
 	const result = await appDB.query("INSERT " + appDB.getIgnore() + " INTO channels \n\
-		(auto_refill_threshold,auto_refill_amount, asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url) \n\
-		VALUES (?,?,?,?,?,?,?,?,?)",
-		[auto_refill_threshold, auto_refill_amount, asset, timeout, aa_address, salt, peer_address, peer_device_address, peer_url]);
+		(auto_refill_threshold,auto_refill_amount, asset, timeout,aa_address,salt,peer_address,peer_device_address,peer_url,version) \n\
+		VALUES (?,?,?,?,?,?,?,?,?,?)",
+		[auto_refill_threshold, auto_refill_amount, asset, timeout, aa_address, salt, peer_address, peer_device_address, peer_url, aaDefinitions.getDefaultVersion()]);
 	if (result.affectedRows !== 1)
 		return handle("this salt already exists");
 	else {
@@ -808,11 +816,13 @@ function createPaymentPackage(payment_amount, aa_address, handle){
 			aa_address: aa_address 
 		};
 		if (channel.is_known_by_peer === 0) { // if channel is not known by peer, we add the parameters allowing him to save it on this side
-			objPackage.channel_parameters = {};
-			objPackage.channel_parameters.timeout = channel.timeout;
-			objPackage.channel_parameters.asset = channel.asset;
-			objPackage.channel_parameters.salt = channel.salt;
-			objPackage.channel_parameters.address = my_address;
+			objPackage.channel_parameters = {
+				timeout: channel.timeout,
+				asset: channel.asset,
+				salt: channel.salt,
+				address: my_address,
+				version: aaDefinitions.getDefaultVersion(),
+			}
 		}
 
 		const objSignedPackage = await signMessage(objPackage, my_address);
