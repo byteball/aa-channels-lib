@@ -1,4 +1,4 @@
-# aa-channels-lib (testnet only for now)
+# aa-channels-lib
 
 This library handles a bidirectionnal payment channel based on [Autonomous Agents](https://medium.com/obyte/introducing-autonomous-agents-6fe12fb12aa3)
 It allows free, instant and confirmation-free offchain transactions between two parties.
