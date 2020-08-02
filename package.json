@@ -7,9 +7,9 @@
   "dependencies": {
     "body-parser": "^1.19.0",
     "express": "^4.17.1",
-    "headless-obyte": "git+https://github.com/byteball/headless-obyte.git#aa",
+    "headless-obyte": "git+https://github.com/byteball/headless-obyte.git",
     "is-url": "^1.2.4",
-    "ocore": "git+https://github.com/byteball/ocore.git#rocks-and-formulas",
+    "ocore": "git+https://github.com/byteball/ocore.git",
     "request": "^2.88.0",
     "rpcify": "git+https://github.com/byteball/rpcify"
   }
