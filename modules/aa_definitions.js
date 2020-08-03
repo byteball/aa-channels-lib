@@ -15,8 +15,8 @@ function getDefaultVersion(){
 	return DEFAULT_VERSION;
 }
 
-function getAaAddress(addressA, addressB, timeout, asset, salt){
-	return objectHash.getChash160( getAaArrDefinition(addressA, addressB, timeout, asset, salt));
+function getAaAddress(addressA, addressB, timeout, asset, salt, version){
+	return objectHash.getChash160( getAaArrDefinition(addressA, addressB, timeout, asset, salt, version));
 }
 
 
