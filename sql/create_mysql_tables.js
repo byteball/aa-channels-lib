@@ -23,7 +23,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\
 	close_timestamp INTEGER,\n\
 	timeout INTEGER NOT NULL,\n\
-	period INTEGER DEFAULT 1,\n\
+	period INTEGER DEFAULT 0,\n\
 	last_message_from_peer TEXT,\n\
 	last_event_id INTEGER DEFAULT 0,\n\
 	is_definition_confirmed TINYINT DEFAULT 0,\n\
