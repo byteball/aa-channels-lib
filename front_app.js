@@ -181,7 +181,9 @@ async function treatIncomingRequest(objRequest, handle){
 
 async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objChannel, aa_address, handle){
 
-	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel && conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds ? 
+	const maxValidTimestamp = conf.unconfirmedAmountsLimitsByAssetOrChannel
+	&& conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset]
+	&& typeof conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds == 'number' ? 
 	Date.now()/1000 - conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset].minimum_time_in_seconds : 0;
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
@@ -205,7 +207,7 @@ async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objCha
 			unconfirmedDeposit += row.amount;
 	})
 
-	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel)
+	if (!conf.unconfirmedAmountsLimitsByAssetOrChannel || !conf.unconfirmedAmountsLimitsByAssetOrChannel[objChannel.asset])
 		return handle(null, 0);
 
 	const unconfirmedSpentByAssetRows =	await conn.query("SELECT amount_spent_by_peer - amount_deposited_by_peer - amount_spent_by_me AS amount FROM channels WHERE asset=?",[objChannel.asset]);
@@ -705,25 +707,30 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 }
 
 function autoRefillChannels(){
-	mutex.lockOrSkip(["autoRefillChannels"], async function(unlock){
-		const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
-		IFNULL((SELECT SUM(amount) FROM my_deposits WHERE my_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
-		FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold"); //pending deposits are taken into account when comparing with auto_refill_threshold
-		async.eachSeries(rows, function(row, cb){
-			deposit(row.aa_address, row.auto_refill_amount, function(error){
-				if (error){
-					console.log("error when auto refill " + error);
-					return cb();
+	return new Promise((resolve)=>{
+		mutex.lock(["autoRefillChannels"], async function(unlock){
+			const rows = await appDB.query("SELECT channels.aa_address, auto_refill_threshold, auto_refill_amount, (amount_deposited_by_me - amount_spent_by_me + amount_spent_by_peer) AS free_amount,\n\
+			IFNULL((SELECT SUM(amount) FROM my_deposits WHERE my_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS pending_amount\n\
+			FROM channels WHERE (free_amount + pending_amount) < auto_refill_threshold"); //pending deposits are taken into account when comparing with auto_refill_threshold
+			async.eachSeries(rows, function(row, cb){
+				deposit(row.aa_address, row.auto_refill_amount, function(error){
+					if (error){
+						console.log("error when auto refill " + error);
+						return cb();
+					}
+					else {
+						console.log("channel " + row.aa_address + " refilled with " + row.auto_refill_amount + " bytes");
+						eventBus.emit("channel_refilled", row.aa_address, row.auto_refill_amount);
+						return cb();
+					}
+				});
+			},
+				()=>{
+					unlock();
+					resolve();
 				}
-				else {
-					console.log("channel " + row.aa_address + " refilled with " + row.auto_refill_amount + " bytes");
-					eventBus.emit("channel_refilled", row.aa_address, row.auto_refill_amount);
-					return cb();
-				}
-			});
-		}, 
-			unlock
-		);
+			);
+		});
 	});
 }
 
@@ -731,8 +738,10 @@ async function setAutoRefill(aa_address, refill_amount, refill_threshold, handle
 	const result = await appDB.query("UPDATE channels SET auto_refill_threshold=?,auto_refill_amount=? WHERE aa_address=?", [refill_threshold, refill_amount, aa_address]);
 	if (result.affectedRows !== 1)
 		return handle("aa_address not known");
-	else
+	else {
+		await autoRefillChannels();
 		return handle(null);
+	}
 }
 
 async function getBalancesAndStatus(aa_address, handle){

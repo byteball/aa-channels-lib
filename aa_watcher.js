@@ -220,10 +220,10 @@ function treatNewOutputsToChannels(channels, new_unit){
 								var timestamp = Math.round(Date.now() / 1000);
 								if (bHasData) // a deposit shouldn't have data, if it has data we consider it's a closing request and we flag it as so
 									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
-									[ channel.aa_address,new_unit.unit, timestamp]);
+									[channel.aa_address,new_unit.unit, timestamp]);
 								else if (lockedChannel.asset != 'base' || byteAmount > 10000) // deposit in bytes are possible only over 10000
 									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
-									[ channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
+									[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
 							}
 						}
 					}
