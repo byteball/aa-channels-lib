@@ -383,6 +383,7 @@ function deposit(aa_address, amount, handle){
 		const options = {
 			asset: channel.asset,
 			change_address: my_address,
+			spend_unconfirmed: 'all',
 		}
 
 		if (channel.asset == 'base')
@@ -686,6 +687,7 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 			}],
 			asset: asset,
 			change_address: my_address,
+			spend_unconfirmed: 'all',
 		}
 
 		if (asset == 'base')
