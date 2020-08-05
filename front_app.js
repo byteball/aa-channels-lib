@@ -94,7 +94,21 @@ async function init(retryIndex){
 		autoRefillChannels();
 		setInterval(autoRefillChannels, 30000);
 	}
+
+	if (conf.bLight && !conf.isHighAvailabilityNode)
+		await waitHistoryIsProcessed();
+
 	eventBus.emit("aa_channels_ready");
+}
+
+function waitHistoryIsProcessed(){
+	return new Promise((resolve)=>{
+		const lightWallet = require('ocore/light_wallet.js');
+		if (lightWallet.isFirstHistoryReceived())
+			return resolve();
+		else
+			eventBus.once('refresh_light_done', resolve)
+	})
 }
 
 function startHttpServer(port){
@@ -675,7 +689,6 @@ function sendRequestToPeer(comLayer, peer, objToBeSent, responseCb, timeOutCb){
 
 function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_amount, asset){
 	return new Promise(async (resolve, reject) => {
-		console.error("sendDefinitionAndDepositToChannel");
 		const payload = { address: aa_address, definition: arrDefinition };
 
 		const options = {
