@@ -65,8 +65,8 @@
 			<% }%>
 
 			</td>
-			<td><%= channels[k].amount_spent_by_peer %> in <%= channels[k].peer_payments_count %> payment<%= channels[k].peer_payments_count > 1 ? 's' :'' %></td>
-			<td><%= channels[k].amount_spent_by_me %> in <%= channels[k].my_payments_count %> payment<%= channels[k].my_payments_count > 1 ? 's' :'' %></td>
+			<td><%= channels[k].amount_spent_by_peer %> in <%= channels[k].peer_payments_count %> payment<%= channels[k].peer_payments_count != 1 ? 's' :'' %></td>
+			<td><%= channels[k].amount_spent_by_me %> in <%= channels[k].my_payments_count %> payment<%= channels[k].my_payments_count != 1 ? 's' :'' %></td>
 			<td>
 				<% if (channels[k].my_payments_count > 0){%>
 				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date) %>
