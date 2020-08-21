@@ -16,6 +16,8 @@ exports.minChannelTimeoutInSeconds = 600;  // timeout value under which channel 
 exports.maxChannelTimeoutInSeconds = 1000; // timeout value above which channel creation request will be refused
 exports.defaultTimeoutInSeconds = 600;. // default timeout value for channels created by me
 
+exports.webServerPort = 8080; // port for web dashboard
+
 exports.unconfirmedAmountsLimitsByAssetOrChannel = { // settings for accepting payments backed by unconfirmed channel and/or deposit
 	"base" : {
 		max_unconfirmed_by_asset : 1e6, // won't allow payment if current total unconfirmed over this amount
@@ -28,6 +30,8 @@ exports.unconfirmedAmountsLimitsByAssetOrChannel = { // settings for accepting p
 		minimum_time_in_seconds : 2
 	}
 }
+
+
 
 exports.isHighAvailabilityNode =  false;
 
@@ -118,6 +122,16 @@ channels.close(aa_address, function(error){
 - **aa_address**: address of the channel you want to close
 - **error**: if the closing is not successful, this string will indicate the reason.
 After you authored the closing of a channel, you cannot send payment through it anymore and any payment received will be refused. You can listen the event `channel_closed` to know when the channel is effectively closed and your remaining balance has been refunded.
+
+#### sweep
+```javascript
+channels.sweep(aa_address, function(error){
+	
+});
+```
+- **aa_address**: address of the channel you want to sweep
+- **error**: if the closing couldn't be closed, this string will indicate the reason.
+This function is same as `close` but doesn't reset autorefill parameters. 
 
 #### getBalancesAndStatus
 ```javascript

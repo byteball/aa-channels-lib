@@ -85,7 +85,7 @@ For events you need also
 
 All library [functions](doc/reference.md#Functions) are available as property, example:
 ```javascript
-channel.setAutoRefill("7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG",122000, 300000, function(error){
+channels.setAutoRefill("7FLNK5AIWSYU2TVEKRW4CHCQUAKOYGWG",122000, 300000, function(error){
 	if (error)
 		console.log(error);
 });
@@ -150,4 +150,16 @@ The exact setup depends of you need but you will likely use:
 * an external MySQL database to which front app and background app can connect to.
 
 Check specific documentation there: https://github.com/Papabyte/aa-channels-lib/blob/master/doc/ha_mode.md
+</details>
+
+<details><summary>Web dashboard</summary>
+A local web dashboard can be enabled to check the states of all channels 
+
+* Port configuration:
+```javascript
+exports.webServerPort = 8080;
+```
+
+![web dashboard](source-doc/dashboard.png?raw=true "Client configuration")
+
 </details>

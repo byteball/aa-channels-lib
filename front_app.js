@@ -315,7 +315,16 @@ function setCallBackForPaymentReceived(_cb){
 	paymentReceivedCallback = _cb;
 }
 
-async function close(aa_address, handle){
+function close(aa_address, handle){
+	setAutoRefill(aa_address, 0, 0, function(error){
+		if (error)
+			return handle(error);
+		else
+			sweep(aa_address, handle);
+	})
+}
+
+async function sweep(aa_address, handle){
 	if (!conf.isHighAvailabilityNode){
 		mutex.lock([aa_address], async function(unlock){
 		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer, status FROM channels WHERE aa_address=?", [aa_address]);
@@ -328,7 +337,7 @@ async function close(aa_address, handle){
 		const payload = { 
 			close: 1, 
 			period: channel.status == 'closed' ? channel.period + 1 : channel.period
-		 };
+		};
 		if (channel.amount_spent_by_me + channel.overpayment_from_peer > 0)
 			payload.transferredFromMe = channel.amount_spent_by_me + channel.overpayment_from_peer;
 		if (channel.amount_spent_by_peer > 0)
@@ -1017,6 +1026,7 @@ exports.createNewChannel = createNewChannel;
 exports.deposit = deposit;
 exports.sendMessageAndPay = sendMessageAndPay;
 exports.close = close;
+exports.sweep = sweep;
 exports.setCallBackForPaymentReceived = setCallBackForPaymentReceived;
 exports.getBalancesAndStatus = getBalancesAndStatus;
 exports.verifyPaymentPackage = verifyPaymentPackage;
