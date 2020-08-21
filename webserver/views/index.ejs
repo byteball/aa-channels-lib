@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title><%= conf.deviceName %> AA channels</title>
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" />
+	<link rel="stylesheet" href="https://cdn.datatables.net/1.10.19/css/dataTables.bootstrap.min.css" />
+	<link rel="icon" type="image/png" sizes="192x192"  href="https://obyte.org/static/android-icon-192x192.png">
+	<style>
+		body {margin: 15px}
+		table, tr, td, th {border: 1px solid gray; margin-top:50px;}
+		th {text-align: center}
+		td, th {padding: 4px}
+		tr:nth-of-type(odd) {background-color:#eee}
+		.center {text-align: center}
+		.right {text-align: right}
+		.monospace {
+			font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace;
+		}
+	</style>
+</head>
+<body onload = "autoRefresh(5000);">
+<h1><%= conf.deviceName %> AA channels</h1>
+<table id="channels" class="table table-striped table-bordered table-responsive">
+	<thead>
+		<tr>
+			<th>Peer</th>
+			<th>Asset</th>
+			<th>AA address</th>
+			<th>Status</th>
+			<th>Amount spent by peer</th>
+			<th>Amount spent by me</th>
+			<th>Last payment from me</th>
+			<th>Amount deposited by me (unconfirmed)</th>
+		</tr>
+	</thead>
+	<tbody>
+		<% for(var k in channels) {%>
+		<tr>
+			<td class="monospace">
+				<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].peer_address %>" target="_blank"><%= channels[k].peer_address %></a>
+			</td>
+			<td><%= channels[k].asset %></td>
+			<td class="monospace">
+				<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].aa_address %>" target="_blank"><%= channels[k].aa_address %></a>
+			</td>
+			<td>
+			<% if (channels[k].status == 'closed') {%>
+				<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_changing_status_unit %>" target="_blank">
+					closed
+				</a>
+				<% if (channels[k].close_timestamp) { %>
+				on <%= new Date(channels[k].close_timestamp * 1000) %>
+				<% } %>
+			<% } else if (channels[k].status != 'open'){ %>
+				<%= channels[k].status.replace(/_/g,' ') %>
+			<% }%>
+			<% if (channels[k].status == 'open') { %>
+
+				<form method="post" action="/">
+					<input name="aa_address" type="hidden" value="<%= channels[k].aa_address %>">
+					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_changing_status_unit %>" target="_blank">open</a>
+					<button type="submit" class="btn btn-primary btn-sm">Close</button>
+				</form>
+			<% }%>
+
+			</td>
+			<td><%= channels[k].amount_spent_by_peer %> in <%= channels[k].peer_payments_count %> payment<%= channels[k].peer_payments_count > 1 ? 's' :'' %></td>
+			<td><%= channels[k].amount_spent_by_me %> in <%= channels[k].my_payments_count %> payment<%= channels[k].my_payments_count > 1 ? 's' :'' %></td>
+			<td>
+				<% if (channels[k].my_payments_count > 0){%>
+				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date) %>
+				<% } %>
+			</td>
+			<td><%= channels[k].amount_deposited_by_me + channels[k].my_pending_deposit %> (<%=channels[k].my_pending_deposit %>)</td>
+		</tr>
+		<% } %>
+	</tbody>
+</table>
+
+<script>
+	
+
+function autoRefresh() {
+	setTimeout("location.reload(true);", 5000);
+}
+</script>
+</body>
+</html>

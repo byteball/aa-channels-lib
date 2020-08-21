@@ -18,6 +18,8 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	amount_deposited_by_peer INTEGER DEFAULT 0,\n\
 	amount_deposited_by_me INTEGER DEFAULT 0,\n\
 	amount_possibly_lost_by_me INTEGER DEFAULT 0,\n\
+	my_payments_count INTEGER DEFAULT 0,\n\
+	peer_payments_count INTEGER DEFAULT 0,\n\
 	overpayment_from_peer INTEGER DEFAULT 0,\n\
 	auto_refill_threshold INTEGER DEFAULT 0,\n\
 	auto_refill_amount INTEGER DEFAULT 0,\n\
@@ -26,13 +28,30 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	period INTEGER DEFAULT 0,\n\
 	last_message_from_peer TEXT,\n\
 	last_event_id INTEGER DEFAULT 0,\n\
+	last_changing_status_unit CHAR(44) DEFAULT NULL,\n\
 	is_definition_confirmed TINYINT DEFAULT 0,\n\
 	closing_authored TINYINT DEFAULT 0,\n\
-	status VARCHAR(30) DEFAULT 'created',\n\
+	status VARCHAR(30) DEFAULT 'closed',\n\
 	last_updated_mci INTEGER DEFAULT NULL,\n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE (peer_address, salt)\n\
 );");
+
+db.query("CREATE TABLE IF NOT EXISTS payments_received (\n\
+	id INTEGER PRIMARY KEY AUTOINCREMENT, \n\
+	aa_address CHAR(32), \n\
+	amount INTEGER NOT NULL,\n\
+	date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
+);");
+db.query("CREATE INDEX IF NOT EXISTS paymentsReceivedByAaAndId ON payments_received(aa_address,id)");
+
+db.query("CREATE TABLE IF NOT EXISTS payments_sent (\n\
+	id INTEGER PRIMARY KEY AUTOINCREMENT, \n\
+	aa_address CHAR(32), \n\
+	amount INTEGER NOT NULL,\n\
+	date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n\
+);");
+db.query("CREATE INDEX IF NOT EXISTS paymentSentByAaAndId ON payments_sent(aa_address,id)");
 
 db.query("CREATE TABLE IF NOT EXISTS my_deposits (\n\
 	aa_address CHAR(32) NOT NULL, \n\

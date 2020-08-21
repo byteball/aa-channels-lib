@@ -7,6 +7,9 @@ exports.deviceName = 'AA-channel-lib';
 exports.permanent_pairing_secret = '0000';
 exports.control_addresses = [''];
 
+
+exports.webServerPort = 8080; // port for web dashboard
+
 exports.minChannelTimeoutInSeconds = 800; // minimal channel timeout acceptable
 exports.maxChannelTimeoutInSeconds = 1500;  // maximal channel timeout acceptable
 exports.defaultTimeoutInSeconds = 1000; // default timeout for channel creation

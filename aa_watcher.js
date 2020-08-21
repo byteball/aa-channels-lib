@@ -178,7 +178,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 	return new Promise(async (resolve) => {
 		async.eachSeries(channels, function(channel, eachCb){
 			mutex.lock([channel.aa_address], async function(unlock_aa){
-				var connAppDb = await takeAppDbConnectionPromise();
+				var connAppDb = await appDB.takeConnectionFromPool();
 				if (conf.isHighAvailabilityNode) {
 					var connDagDb = dagDB;
 					var results = await	connAppDb.query("SELECT GET_LOCK(?,1) as my_lock",[channel.aa_address]);
@@ -212,8 +212,8 @@ function treatNewOutputsToChannels(channels, new_unit){
 							if (message.app == "data")
 								bHasData = true;
 						});
-						// for this 3 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
-						if (lockedChannel.status == "created" || lockedChannel.status == "closed"|| lockedChannel.status == "open"){
+						// for this 2 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
+						if (lockedChannel.status == "closed"|| lockedChannel.status == "open"){
 							var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
 							var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
 							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){ // we ignore unit if a closing request happened or no pending/confirmed definition is known
@@ -263,14 +263,6 @@ function getJointFromCacheStorageOrHub(conn, unit){
 			}
 		});
 		setTimeout(resolve, 1000);
-	});
-}
-
-function takeAppDbConnectionPromise(){
-	return new Promise(async (resolve) => {
-		appDB.takeConnectionFromPool(function(conn) {
-			resolve(conn);
-		});
 	});
 }
 
@@ -327,7 +319,7 @@ function treatUnitsFromAA(arrUnits){
 function treatUnitFromAA(new_unit){
 	return new Promise(async (resolve) => {
 		mutex.lock([new_unit.author_address], async function(unlock_aa){
-			var connAppDb = await takeAppDbConnectionPromise();
+			var connAppDb = await appDB.takeConnectionFromPool();
 			if (conf.isHighAvailabilityNode) {
 				var connDagDb = dagDB;
 
@@ -370,7 +362,15 @@ function treatUnitFromAA(new_unit){
 			//channel is open and received funding
 			if (payload.open){
 				await connAppDb.query("UPDATE my_deposits SET is_confirmed_by_aa=1 WHERE unit=?", [payload.trigger_unit]);
-				await setLastUpdatedMciAndEventIdAndOtherFields({ status: "open", period: payload.period, amount_deposited_by_peer: payload[channel.peer_address], amount_deposited_by_me: payload[my_address] })
+				await setLastUpdatedMciAndEventIdAndOtherFields(
+					{ 
+						status: "open",
+						period: payload.period, 
+						amount_deposited_by_peer: payload[channel.peer_address], 
+						amount_deposited_by_me: payload[my_address],
+						last_changing_status_unit: new_unit.unit,
+					}
+				);
 				if (payload[my_address] > 0)
 					eventBus.emit("my_deposit_became_stable", payload[my_address], payload.trigger_unit);
 				else
@@ -389,7 +389,13 @@ function treatUnitFromAA(new_unit){
 						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer, channel.last_message_from_peer); //peer isn't honest, we confirm closing with a fraud proof
 					}
 				}
-				await setLastUpdatedMciAndEventIdAndOtherFields({ status: status, period: payload.period, close_timestamp: new_unit.timestamp });
+				await setLastUpdatedMciAndEventIdAndOtherFields(
+					{ status: status, 
+						period: payload.period, 
+						close_timestamp: new_unit.timestamp,
+						last_changing_status_unit: new_unit.unit,
+					})
+				;
 			}
 			//AA confirms that channel is closed
 			if (payload.closed){
@@ -404,6 +410,8 @@ function treatUnitFromAA(new_unit){
 						amount_deposited_by_me: 0,
 						overpayment_from_peer: 0,
 						amount_possibly_lost_by_me: 0,
+						my_payments_count: 0,
+						peer_payments_count: 0,
 						last_message_from_peer: ''
 					});
 				const rows = await connDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
@@ -446,8 +454,8 @@ async function closeUnderLock(row, cb){
 	if (!conf.isHighAvailabilityNode)
 		throw Error("closing request not in high availability mode");
 
-	var connAppDB = await takeAppDbConnectionPromise();
-	var results = await	connAppDB.query("SELECT GET_LOCK(?,1) as my_lock",[row.aa_address]);
+	var connAppDB = await appDB.takeConnectionFromPool();
+	var results = await connAppDB.query("SELECT GET_LOCK(?,1) as my_lock",[row.aa_address]);
 	if (!results[0].my_lock || results[0].my_lock === 0){
 		connAppDB.release();
 		cb();
@@ -456,7 +464,7 @@ async function closeUnderLock(row, cb){
 
 	const payload = {
 		close: 1, 
-		period: row.status == 'closed' || row.status == 'created' ? row.period + 1 : row.period
+		period: row.status == 'closed' ? row.period + 1 : row.period
 	};
 	if (row.amount_spent_by_me > 0)
 		payload.transferredFromMe = row.amount_spent_by_me;
@@ -479,7 +487,7 @@ async function closeUnderLock(row, cb){
 			console.log("error when closing channel " + error);
 		else{
 			await connAppDB.query("UPDATE channels SET closing_authored=0 WHERE aa_address=?", [row.aa_address]);
-			await connAppDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open' OR status='created')", [row.aa_address]);
+			await connAppDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open')", [row.aa_address]);
 		}
 		await connAppDB.query("DO RELEASE_LOCK(?)",[row.aa_address]);
 		await connAppDB.release();
