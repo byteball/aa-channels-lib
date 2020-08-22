@@ -1,10 +1,10 @@
 const objectHash = require('ocore/object_hash.js');
 
 
-const DEFAULT_VERSION = "1.0";
+const DEFAULT_VERSION = "1.1";
 
 const BASE_AA_BY_VERSION = {
-	"1.0": "SDFSAPTYVHQ6IUNJ6NYEHH2PL544AWLQ"
+	"1.1": "4IRUGAUUCAQ6QRQLG4SNOLOE6VW2STWZ"
 }
 
 function doesAaVersionExist(version){

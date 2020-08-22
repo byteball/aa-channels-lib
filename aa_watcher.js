@@ -65,22 +65,8 @@ function lookForAndProcessTasks(){ // main loop for repetitive tasks
 		return console.log("first history not processed");
 	updateAddressesToWatch();
 	confirmClosingIfTimeoutReached();
-	deletePendingUnconfirmedUnits();
 	if (conf.isHighAvailabilityNode)
 		treatClosingRequests();
-}
-
-// some unconfirmed units may be left if unit from AA were disorderly received
-async function deletePendingUnconfirmedUnits(){
-	const unconfirmedUnitsRows = await appDB.query("SELECT unit FROM unconfirmed_units_from_peer");
-	if (unconfirmedUnitsRows.length === 0)
-		return;
-	const mciAndUnitsRows = await dagDB.query("SELECT main_chain_index,unit FROM units WHERE unit IN ('"+ unconfirmedUnitsRows.map(function(row){ return row.unit }).join("','") + "') AND is_stable=1");
-	if (mciAndUnitsRows.length === 0)
-		return;
-	mciAndUnitsRows.forEach(function(row){
-		appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=? AND unit IN (SELECT unit FROM channels where last_updated_mci>=?)",[row.unit, row.main_chain_index]);
-	});
 }
 
 // we compare the list of currently watched addresses with the list of channels addresses, and watch those not watched yet
@@ -129,9 +115,9 @@ async function getSqlFilterForNewUnitsFromChannels(){
 	if (rowsAddresses.length === 0)
 		return " 0 ";
 
-	const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
+	const rowsMaxLastUpdatedMci = await appDB.query("SELECT CASE WHEN MAX(last_updated_mci) IS NOT NULL THEN (MAX(last_updated_mci)) ELSE 0 END min_mci FROM channels;");
 	return " author_address IN ('" + rowsAddresses.map(function(row){return row.aa_address}).join("','") + "') " 
-	+ "AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
+	+ "AND (main_chain_index>=" + rowsMaxLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
 }
 
 async function getSqlFilterForNewUnitsFromPeers(aa_address){
@@ -139,10 +125,9 @@ async function getSqlFilterForNewUnitsFromPeers(aa_address){
 	if (rowsAddresses.length === 0)
 		return " 0 ";
 
-	const rowsMinLastUpdatedMci = await appDB.query("SELECT CASE WHEN MIN(last_updated_mci) IS NOT NULL THEN MIN(last_updated_mci) ELSE 0 END min_mci FROM channels;");
 	return "outputs.address IN ('" +  rowsAddresses.map(function(row){return row.aa_address}).join("','") +"')" +
 	" AND author_address IN ('" +  rowsAddresses.map(function(row){return row.peer_address}).join("','") +"')" +
-	" AND (main_chain_index>=" + rowsMinLastUpdatedMci[0].min_mci + " OR main_chain_index IS NULL)";
+	" AND is_stable=0";
 }
 
 
@@ -378,7 +363,7 @@ function treatUnitFromAA(new_unit){
 			}
 
 			//closing requested by one party
-			if (payload.closing){
+			if (payload.closing && channel.last_event_id < payload.event_id){ // if outdated, do nothing
 				if (payload.initiated_by === my_address)
 					var status = "closing_initiated_by_me_acknowledged";
 				else {
@@ -504,7 +489,7 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 			var payload = { confirm: 1, period: period };
 		}
 		if (overpayment_from_peer > 0)
-			payload.additionnalTransferredFromMe = overpayment_from_peer;
+			payload.additionalTransferredFromMe = overpayment_from_peer;
 
 		const options = {
 			messages: [{
@@ -521,7 +506,7 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 			if (error)
 				console.log("error when closing channel " + error);
 			else
-				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=?", [aa_address]);
+				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=? AND period=?", [aa_address, period]);
 			unlock();
 		});
 	});

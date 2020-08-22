@@ -205,7 +205,7 @@ async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objCha
 	const unconfirmedUnitsRows =	await conn.query("SELECT SUM(amount) AS amount,close_channel,has_definition,is_bad_sequence,timestamp \n\
 	FROM unconfirmed_units_from_peer WHERE aa_address=?",[aa_address]);
 	const bHasBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel === 1});
-	const	bHasDefinition = unconfirmedUnitsRows.some(function(row){return row.timestamp < maxValidTimestamp && row.has_definition === 1}) || objChannel.is_definition_confirmed === 1;
+	const	bHasDefinition = unconfirmedUnitsRows.some(function(row){return row.timestamp <= maxValidTimestamp && row.has_definition === 1}) || objChannel.is_definition_confirmed === 1;
 	const bHasBadSequence = unconfirmedUnitsRows.some(function(row){return row.is_bad_sequence ===1});
 
 	if (bHasBeenClosed)
@@ -220,7 +220,7 @@ async function checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, objCha
 
 	var unconfirmedDeposit = 0;
 	unconfirmedUnitsRows.forEach(function(row){
-		if (row.timestamp < maxValidTimestamp)
+		if (row.timestamp <= maxValidTimestamp)
 			unconfirmedDeposit += row.amount;
 	})
 
@@ -947,7 +947,7 @@ function verifyPaymentPackage(objSignedPackage, handle){
 
 				checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
 					if (error)
-						return unlockAndHandle( error);
+						return unlockAndHandle(error);
 
 					const delta_amount_spent = Math.max(objSignedMessage.amount_spent - channel.amount_spent_by_peer, 0);
 					const peer_credit = delta_amount_spent + channel.overpayment_from_peer;

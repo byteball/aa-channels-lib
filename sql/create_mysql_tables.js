@@ -36,6 +36,7 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE KEY bySaltAndPeerAddressUnit(peer_address, salt)\n\
 ) ENGINE=InnoDB  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;"); 
+db.query("CREATE INDEX IF NOT EXISTS channelsByLastUpdatedMci ON channels(last_updated_mci)");
 
 db.query("CREATE TABLE IF NOT EXISTS payments_received (\n\
 	id INTEGER PRIMARY KEY AUTOINCREMENT, \n\

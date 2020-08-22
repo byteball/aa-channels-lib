@@ -37,6 +37,8 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	UNIQUE (peer_address, salt)\n\
 );");
 
+db.query("CREATE INDEX IF NOT EXISTS channelsByLastUpdatedMci ON channels(last_updated_mci)");
+
 db.query("CREATE TABLE IF NOT EXISTS payments_received (\n\
 	id INTEGER PRIMARY KEY AUTOINCREMENT, \n\
 	aa_address CHAR(32), \n\

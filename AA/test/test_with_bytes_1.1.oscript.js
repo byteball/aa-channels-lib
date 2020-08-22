@@ -2,7 +2,7 @@ const path = require('path')
 const { Testkit, Utils } = require('aa-testkit')
 const { Network } = Testkit()
 
-describe('asset - open-closed normally confirmed, open-closed timeout, open-closed fraud proof', function () {
+describe('open-closed normally confirmed, open-closed timeout, open-closed fraud proof', function () {
 	this.timeout(120 * 1000)
 
 	const close_timeout = 2000;
@@ -10,10 +10,9 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 
 	before(async () => {
 		this.network = await Network.create()
-			.with.agent({ base_aa: path.join(__dirname, '../channels_base_aa_1.0.ojson') })
-			.with.asset({ theAsset: {} })
-			.with.wallet({ alice: 10e9, theAsset: 10e9 })
-			.with.wallet({ bob: 10e9, theAsset: 10e9 })
+			.with.agent({ base_aa: path.join(__dirname, '../channels_base_aa_1.1.ojson') })
+			.with.wallet({ alice: 10e9 })
+			.with.wallet({ bob: 10e9 })
 			.with.explorer()
 			.run()
 
@@ -27,7 +26,7 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 				params:	{
 					addressA: this.aliceAddress,
 					addressB: this.bobAddress,
-					asset: this.network.asset.theAsset,
+					asset: 'base',
 					timeout: close_timeout
 				}
 			});
@@ -38,42 +37,12 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 
 	}).timeout(15000)
 
-	it('send asset to Alice and Bob', async () => {
-		const { unit, error } = await this.network.deployer.sendMulti({
-			asset: this.network.asset.theAsset,
-					asset_outputs:[{
-						address: this.aliceAddress,
-						amount: 15e9
-					},
-					{
-						address: this.bobAddress,
-						amount: 80e9
-					}]
-			}
-		);
-		expect(error).to.be.null
-		expect(unit).to.be.validUnit
-		await this.network.witnessUntilStable(unit)
-
-	}).timeout(15000)
-
-
 	const depositedByAlicePeriod_1 = 2e9;
 	it('Alice opens channel', async () => {
-
-		var { unit, error } = await this.network.wallet.alice.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByAlicePeriod_1,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
-
+		const { unit, error } = await this.network.wallet.alice.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByAlicePeriod_1,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -99,19 +68,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 
 	const depositedByBobPeriod_1 = 1e9;
 	it('Bob funds channel', async () => {
-
-		var { unit, error } = await this.network.wallet.bob.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByBobPeriod_1,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
+		const { unit, error } = await this.network.wallet.bob.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByBobPeriod_1,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -267,18 +227,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 
 	it('Bob tries to deposit', async () => {
 
-		var { unit, error } = await this.network.wallet.bob.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: 50000,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
+		const { unit, error } = await this.network.wallet.bob.sendBytes({
+			toAddress: this.aa_address,
+			amount: 50000,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -289,7 +241,7 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 		expect(dataPayload.refused).to.be.equal(1)
 		event_id +=1;
 		expect(dataPayload.event_id).to.be.equal(event_id)
-		expect(Utils.hasOnlyTheseExternalPayments(unitObj,[{asset: this.network.asset.theAsset, address: this.bobAddress, amount: 50000}])).to.be.true
+		expect(Utils.hasOnlyTheseExternalPayments(unitObj,[{address: this.bobAddress, amount: 50000 - 10000}])).to.be.true
 
 		
 	}).timeout(15000)
@@ -321,19 +273,14 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 		expect(dataPayload.event_id).to.be.equal(event_id)
 
 		const payments = Utils.getExternalPayments(unitObj)
-		expect(payments).to.have.lengthOf(4)
+		expect(payments).to.have.lengthOf(2)
 
-		const paymentByteToAlice = payments.find(m => m.address === this.aliceAddress && !m.asset)
-		const paymentByteToBob = payments.find(m => m.address === this.bobAddress && !m.asset)
+		const paymentToAlice = payments.find(m => m.address === this.aliceAddress)
+		const paymentToBob = payments.find(m => m.address === this.bobAddress)
 
-		const paymentAssetToAlice = payments.find(m => m.address === this.aliceAddress && m.asset == this.network.asset.theAsset)
-		const paymentAssetToBob = payments.find(m => m.address === this.bobAddress && m.asset == this.network.asset.theAsset)
+		expect(paymentToAlice.amount).to.be.above(depositedByAlicePeriod_1 - amountSpentByAlicePeriod_1 + amountSpentByBobPeriod_1 - 10000)
+		expect(paymentToBob.amount).to.be.equal(depositedByBobPeriod_1 - amountSpentByBobPeriod_1 + amountSpentByAlicePeriod_1 + 10000)
 
-		expect(paymentByteToAlice.amount).to.be.above(10000)
-		expect(paymentByteToBob.amount).to.be.equal(10000)
-
-		expect(paymentAssetToAlice.amount).to.be.equal(depositedByAlicePeriod_1 - amountSpentByAlicePeriod_1 + amountSpentByBobPeriod_1)
-		expect(paymentAssetToBob.amount).to.be.equal(depositedByBobPeriod_1 - amountSpentByBobPeriod_1 + amountSpentByAlicePeriod_1)
 
 		const { vars } = await this.network.deployer.readAAStateVars(this.aa_address)
 		expect(vars['balanceA']).to.be.undefined
@@ -349,19 +296,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 	const depositedByBobPeriod_2 = 0;
 
 	it('Alice opens channel', async () => {
-
-		var { unit, error } = await this.network.wallet.alice.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByAlicePeriod_2,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
+		const { unit, error } = await this.network.wallet.alice.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByAlicePeriod_2,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -466,7 +404,7 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 			amount: 10000,
 			data: {
 				period: 2,
-				additionnalTransferredFromMe: additionalTransferredFromBob,
+				additionalTransferredFromMe: additionalTransferredFromBob,
 				confirm: 1,
 			},
 		})
@@ -487,19 +425,13 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 		expect(dataPayload.event_id).to.be.equal(event_id)
 
 		const payments = Utils.getExternalPayments(unitObj)
-		expect(payments).to.have.lengthOf(4)
+		expect(payments).to.have.lengthOf(2)
 
-		const paymentByteToAlice = payments.find(m => m.address === this.aliceAddress && !m.asset)
-		const paymentByteToBob = payments.find(m => m.address === this.bobAddress && !m.asset)
+		const paymentToAlice = payments.find(m => m.address === this.aliceAddress)
+		const paymentToBob = payments.find(m => m.address === this.bobAddress)
 
-		const paymentAssetToAlice = payments.find(m => m.address === this.aliceAddress && m.asset == this.network.asset.theAsset)
-		const paymentAssetToBob = payments.find(m => m.address === this.bobAddress && m.asset == this.network.asset.theAsset)
-
-		expect(paymentByteToAlice.amount).to.be.above(10000)
-		expect(paymentByteToBob.amount).to.be.equal(10000)
-
-		expect(paymentAssetToAlice.amount).to.be.equal(depositedByAlicePeriod_2 - amountSpentByAlicePeriod_2 + amountSpentByBobPeriod_2 + additionalTransferredFromBob)
-		expect(paymentAssetToBob.amount).to.be.equal(depositedByBobPeriod_2 - amountSpentByBobPeriod_2 + amountSpentByAlicePeriod_2  - additionalTransferredFromBob)
+		expect(paymentToAlice.amount).to.be.above(depositedByAlicePeriod_2 - amountSpentByAlicePeriod_2 + amountSpentByBobPeriod_2 - 10000 + additionalTransferredFromBob)
+		expect(paymentToBob.amount).to.be.equal(depositedByBobPeriod_2 - amountSpentByBobPeriod_2 + amountSpentByAlicePeriod_2 + 10000 - additionalTransferredFromBob)
 
 
 		const { vars } = await this.network.deployer.readAAStateVars(this.aa_address)
@@ -518,19 +450,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 	const depositedByBobPeriod_3 = 3.5e9;
 
 	it('Alice opens channel', async () => {
-
-		var { unit, error } = await this.network.wallet.alice.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByAlicePeriod_3,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
+		const { unit, error } = await this.network.wallet.alice.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByAlicePeriod_3,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -555,20 +478,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 	}).timeout(15000)
 
 	it('Bob funds channel', async () => {
-
-		var { unit, error } = await this.network.wallet.bob.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByBobPeriod_3,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
-
+		const { unit, error } = await this.network.wallet.bob.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByBobPeriod_3,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
@@ -711,13 +624,11 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 		expect(dataPayload.event_id).to.be.equal(event_id)
 
 		const payments = Utils.getExternalPayments(unitObj)
-		expect(payments).to.have.lengthOf(2)
+		expect(payments).to.have.lengthOf(1)
+		const paymentToBob = payments.find(m => m.address === this.bobAddress)
 
-		const paymentByteToBob = payments.find(m => m.address === this.bobAddress && !m.asset)
-		const paymentAssetToBob = payments.find(m => m.address === this.bobAddress && m.asset == this.network.asset.theAsset)
+		expect(paymentToBob.amount).to.be.above(depositedByBobPeriod_3 + depositedByAlicePeriod_3)
 
-		expect(paymentByteToBob.amount).to.be.above(10000)
-		expect(paymentAssetToBob.amount).to.be.equal(depositedByBobPeriod_3 + depositedByAlicePeriod_3)
 
 		const { vars } = await this.network.deployer.readAAStateVars(this.aa_address)
 		expect(vars['balanceA']).to.be.undefined
@@ -732,19 +643,10 @@ describe('asset - open-closed normally confirmed, open-closed timeout, open-clos
 
 	const depositedByAlicePeriod_4 = 2e9;
 	it('Alice opens channel', async () => {
-
-		var { unit, error } = await this.network.wallet.alice.sendMulti({
-			asset: this.network.asset.theAsset,
-			asset_outputs:[{
-				amount: depositedByAlicePeriod_4,
-				address: this.aa_address,
-			}],
-			base_outputs:[{
-				amount:  10000,
-				address: this.aa_address,
-			}]
-		});
-
+		const { unit, error } = await this.network.wallet.alice.sendBytes({
+			toAddress: this.aa_address,
+			amount: depositedByAlicePeriod_4,
+		})
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 

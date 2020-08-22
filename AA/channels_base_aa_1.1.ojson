@@ -129,11 +129,11 @@
 							bounce('too early');
 						if (!is_integer(trigger.data.period) OR trigger.data.period != var['period'])
 							bounce('wrong period');
-						$additionnalTransferredFromMe = trigger.data.additionnalTransferredFromMe otherwise 0;
-						if (!is_integer($additionnalTransferredFromMe) OR $additionnalTransferredFromMe < 0)
-							bounce('bad additionnalTransferredFromMe: ' || $additionnalTransferredFromMe);
-						$additionalSpentByA = $party == 'A' ? $additionnalTransferredFromMe : 0;
-						$additionalSpentByB = $party == 'B' ? $additionnalTransferredFromMe : 0;
+						$additionalTransferredFromMe = trigger.data.additionalTransferredFromMe otherwise 0;
+						if (!is_integer($additionalTransferredFromMe) OR $additionalTransferredFromMe < 0)
+							bounce('bad additionalTransferredFromMe: ' || $additionalTransferredFromMe);
+						$additionalSpentByA = $party == 'A' ? $additionalTransferredFromMe : 0;
+						$additionalSpentByB = $party == 'B' ? $additionalTransferredFromMe : 0;
 						$balanceA = var['balanceA'] - var['spentByA'] + var['spentByB'] + $additionalSpentByB - $additionalSpentByA;
 						$balanceB = var['balanceB'] - var['spentByB'] + var['spentByA'] + $additionalSpentByA - $additionalSpentByB;
 						$finalBalanceA = $balanceA > 0 ? $balanceA : 0; // balance could be < 0 if an unconfirmed deposit was unaccounted 
