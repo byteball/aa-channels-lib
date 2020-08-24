@@ -60,6 +60,14 @@ eventBus.on('sequence_became_bad', function(arrUnits){
 });
 
 
+eventBus.on('aa_response', function(objAAResponse){
+	if (objAAResponse.bounced) {
+		console.log("bounced unit: " + objAAResponse.trigger_unit);
+		appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [objAAResponse.trigger_unit]);
+	}
+});
+
+
 function lookForAndProcessTasks(){ // main loop for repetitive tasks
 	if(conf.bLight && !lightWallet.isFirstHistoryReceived())
 		return console.log("first history not processed");
@@ -71,42 +79,56 @@ function lookForAndProcessTasks(){ // main loop for repetitive tasks
 
 // we compare the list of currently watched addresses with the list of channels addresses, and watch those not watched yet
 async function updateAddressesToWatch(){
+
 	var watched_addresses = (await dagDB.query("SELECT address FROM my_watched_addresses")).map(function(row){ return row.address }).join("','");
-	var rows = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses + "')");
-	rows.forEach(function(row){
-		if (conf.bLight){
-			myWitnesses.readMyWitnesses(async function(witnesses){
-				const objRequest = {addresses: [row.aa_address], witnesses: witnesses};
-				const network = require('ocore/network.js');
-				network.requestFromLightVendor('light/get_history', objRequest,  function(ws, request, response){
-					if (response.error || (!response.joints && !response.unstable_mc_joints))
-						return walletGeneral.addWatchedAddress(row.aa_address, () => {});
-					if (response.joints)
-						response.joints.forEach(function(objUnit){
-							assocJointsFromPeersCache[objUnit.unit.unit] = objUnit.unit;
-						})
-					light.processHistory(response, objRequest.witnesses, {
-						ifError: function(err){
-							console.log("error when processing history for " + row.aa_address +" "+ err);
-						},
-						ifOk: function(){
-							console.log("history processed for " + row.aa_address);
-							treatUnitsAndAddWatchedAddress()
-						}
-					});
+	var rows_aa_addresses = await appDB.query("SELECT aa_address FROM channels WHERE aa_address NOT IN ('" + watched_addresses + "')");
+	if (rows_aa_addresses.length === 0)
+		return console.log("nothing new to watch");
+
+	var aa_addresses = rows_aa_addresses.map(row => row.aa_address);
+
+	if (conf.bLight){
+
+		var aa_addresses_list = aa_addresses.map(dagDB.escape).join(', ');
+		var knownsUnitsRows  = await dagDB.query("SELECT unit FROM unit_authors CROSS JOIN units USING(unit) WHERE is_stable=1 AND address IN("+aa_addresses_list+") \n\
+		UNION \n\
+		SELECT unit FROM outputs CROSS JOIN units USING(unit) WHERE is_stable=1 AND address IN("+aa_addresses_list+")");
+	
+		myWitnesses.readMyWitnesses(async function(witnesses){
+
+			const objRequest = {addresses: aa_addresses, witnesses: witnesses};
+			if (knownsUnitsRows.length)
+				objRequest.known_stable_units = knownsUnitsRows.map(function(row){ return row.unit; });
+			const network = require('ocore/network.js');
+			network.requestFromLightVendor('light/get_history', objRequest,  function(ws, request, response){ // we prepare our own history request to put new joints in cache
+				if (response.error || (!response.joints && !response.unstable_mc_joints))
+					return console.log('no joint received');
+				if (response.joints)
+					response.joints.forEach(function(objUnit){
+						assocJointsFromPeersCache[objUnit.unit.unit] = objUnit.unit;
+					})
+				light.processHistory(response, objRequest.witnesses, {
+					ifError: function(err){
+						console.log("error when processing history for " + row.aa_address +" "+ err);
+					},
+					ifOk: function(){
+						console.log("history processed for " + aa_addresses_list);
+						treatUnitsAndAddWatchedAddresses();
+					}
 				});
 			});
-		} else {
-			treatUnitsAndAddWatchedAddress()
-		}
+		});
+	} else {
+		treatUnitsAndAddWatchedAddresses();
+	}
 
-		async function treatUnitsAndAddWatchedAddress(){
-			await treatUnitsFromAA(); // we treat units from AA first to get more recent confirmed states
-			await treatUnconfirmedUnitsToAA(null, row.aa_address); 
-			walletGeneral.addWatchedAddress(row.aa_address, () => {
-			});
-		}
-	});
+	async function treatUnitsAndAddWatchedAddresses(){
+		await treatUnitsFromAA(); // we treat units from AA first to get more recent confirmed states
+		await treatUnconfirmedUnitsToAA(); 
+		aa_addresses.forEach(function(aa_address){
+			walletGeneral.addWatchedAddress(aa_address, ()=>{});
+		});
+	}
 }
 
 
@@ -152,6 +174,7 @@ function treatUnconfirmedUnitsToAA(arrUnits, aa_address){
 				if (!channels[0])
 					throw Error("channel not found");
 				await	treatNewOutputsToChannels(channels, new_unit);
+				delete assocJointsFromPeersCache[new_unit];
 			}
 			unlock();
 			resolve();
@@ -199,24 +222,24 @@ function treatNewOutputsToChannels(channels, new_unit){
 									bHasClose = true;
 							}
 						});
+					}
 						
-						// this timestamp will be used to check how long the unit has been known from network, 
-						// so we use current timestamp, not the unit one that could have been backtimed
-						var timestamp = Math.round(Date.now() / 1000); 
+					// this timestamp will be used to check how long the unit has been known from network, 
+					// so we use current timestamp, not the unit one that could have been backtimed
+					var timestamp = Math.round(Date.now() / 1000); 
 
-						if (bHasClose) {
-							await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
-							[channel.aa_address,new_unit.unit, timestamp]);
-						} else {
-							var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
-							var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
+					if (bHasClose) {
+						await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
+						[channel.aa_address,new_unit.unit, timestamp]);
+					} else {
+						var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
+						var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
 
-							if (!bHasData && (lockedChannel.status == "closed" || lockedChannel.status == "open") && // for these 2 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
-							!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition) && // we ignore unit if a closing request happened or no pending/confirmed definition is known
-							(lockedChannel.asset != 'base' || byteAmount > 10000)) { // deposit in bytes are possible only over 10000
-								await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
-								[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
-							}
+						if (!bHasData && (lockedChannel.status == "closed" || lockedChannel.status == "open") && // for these 2 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
+						!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition) && // we ignore unit if a closing request happened or no pending/confirmed definition is known
+						(lockedChannel.asset != 'base' || byteAmount > 10000)) { // deposit in bytes are possible only over 10000
+							await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
+							[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
 						}
 					}
 				}
@@ -301,6 +324,7 @@ function treatUnitsFromAA(arrUnits){
 			for (var i = 0; i < new_units.length; i++){
 				var new_unit = new_units[i];
 				await treatUnitFromAA(new_unit);
+				delete assocJointsFromPeersCache[new_unit];
 			}
 			unlock();
 			return resolve_1();
@@ -350,7 +374,6 @@ function treatUnitFromAA(new_unit){
 			//once AA state is updated by an unit, we delete the corresponding unit from unconfirmed units table
 			if (payload.trigger_unit){
 				await connAppDb.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [payload.trigger_unit]);
-				delete assocJointsFromPeersCache[payload.trigger_unit];
 			}
 			//channel is open and received funding
 			if (payload.open){
