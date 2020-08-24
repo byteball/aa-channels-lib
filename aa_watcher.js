@@ -121,7 +121,7 @@ async function getSqlFilterForNewUnitsFromChannels(){
 }
 
 async function getSqlFilterForNewUnitsFromPeers(aa_address){
-	const rowsAddresses = await appDB.query("SELECT last_updated_mci,peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
+	const rowsAddresses = await appDB.query("SELECT peer_address,aa_address FROM channels " + (aa_address ? " WHERE aa_address='"+aa_address+"'" : ""));
 	if (rowsAddresses.length === 0)
 		return " 0 ";
 
@@ -185,8 +185,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 					var amountRows = await connDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
-					var bHasDefinition = false;
-					var bHasData = false;
+					var bHasDefinition, bHasData, bHasClose = false;
 
 					var joint = await getJointFromCacheStorageOrHub(connDagDb, new_unit.unit);
 					if (joint){
@@ -194,25 +193,34 @@ function treatNewOutputsToChannels(channels, new_unit){
 							if (message.app == "definition" && message.payload.address == channel.aa_address){
 								bHasDefinition = true;
 							}
-							if (message.app == "data")
+							if (message.app == "data"){
 								bHasData = true;
+								if (message.payload.close)
+									bHasClose = true;
+							}
 						});
-						// for this 2 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
-						if (lockedChannel.status == "closed"|| lockedChannel.status == "open"){
+						
+						// this timestamp will be used to check how long the unit has been known from network, 
+						// so we use current timestamp, not the unit one that could have been backtimed
+						var timestamp = Math.round(Date.now() / 1000); 
+
+						if (bHasClose) {
+							await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
+							[channel.aa_address,new_unit.unit, timestamp]);
+						} else {
 							var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
 							var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
-							if (!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition)){ // we ignore unit if a closing request happened or no pending/confirmed definition is known
-								var timestamp = Math.round(Date.now() / 1000);
-								if (bHasData) // a deposit shouldn't have data, if it has data we consider it's a closing request and we flag it as so
-									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
-									[channel.aa_address,new_unit.unit, timestamp]);
-								else if (lockedChannel.asset != 'base' || byteAmount > 10000) // deposit in bytes are possible only over 10000
-									await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
-									[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
+
+							if (!bHasData && (lockedChannel.status == "closed" || lockedChannel.status == "open") && // for these 2 statuses, we can take into account unconfirmed deposits since they shouldn't be refused by AA
+							!bAlreadyBeenClosed && (lockedChannel.is_definition_confirmed === 1 || bHasDefinition) && // we ignore unit if a closing request happened or no pending/confirmed definition is known
+							(lockedChannel.asset != 'base' || byteAmount > 10000)) { // deposit in bytes are possible only over 10000
+								await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
+								[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
 							}
 						}
 					}
 				}
+
 				if (conf.isHighAvailabilityNode)
 					await	connAppDb.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
 				connAppDb.release();
@@ -375,7 +383,8 @@ function treatUnitFromAA(new_unit){
 					}
 				}
 				await setLastUpdatedMciAndEventIdAndOtherFields(
-					{ status: status, 
+					{
+						status: status, 
 						period: payload.period, 
 						close_timestamp: new_unit.timestamp,
 						last_changing_status_unit: new_unit.unit,
