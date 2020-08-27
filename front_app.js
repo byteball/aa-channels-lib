@@ -327,16 +327,29 @@ function close(aa_address, handle){
 async function sweep(aa_address, handle){
 	if (!conf.isHighAvailabilityNode){
 		mutex.lock([aa_address], async function(unlock){
-		const channels = await appDB.query("SELECT amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer, status FROM channels WHERE aa_address=?", [aa_address]);
+		const channels = await appDB.query("SELECT last_period_closed_by_me,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period, overpayment_from_peer, status FROM channels WHERE aa_address=?", [aa_address]);
 		if (channels.length === 0){
 			unlock();
 			return handle("unknown AA address");
 		}
 		const channel = channels[0];
 
+		if (channel.status != 'open'){
+			unlock();
+			return handle("Cannot close channel while it is not confirmed open");
+		}
+
+
+		const closing_period = channel.status == 'closed' ? channel.period + 1 : channel.period;
+
+		if (channel.last_period_closed_by_me === closing_period) {
+			unlock();
+			return handle("Period already closed by me");
+		}
+
 		const payload = { 
 			close: 1, 
-			period: channel.status == 'closed' ? channel.period + 1 : channel.period
+			period: closing_period
 		};
 		if (channel.amount_spent_by_me + channel.overpayment_from_peer > 0)
 			payload.transferredFromMe = channel.amount_spent_by_me + channel.overpayment_from_peer;
@@ -360,7 +373,7 @@ async function sweep(aa_address, handle){
 				handle("error when closing channel " + error);
 			}
 			else{
-				await appDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND status='open'", [aa_address]);
+				await appDB.query("UPDATE channels SET last_unconfirmed_status_unit=?,unconfirmed_status='closing_initiated_by_me',last_period_closed_by_me=? WHERE aa_address=?", [unit, closing_period,aa_address]);
 				unlock();
 				handle(null);
 			}
@@ -424,6 +437,9 @@ function deposit(aa_address, amount, handle){
 				return handle("error when deposit to channel " + error);
 			} else{
 				await appDB.query("INSERT INTO my_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, amount, aa_address]);
+				if (channel.status == "closed")
+					await appDB.query("UPDATE channels SET last_unconfirmed_status_unit=?,unconfirmed_status='opened_by_me' WHERE aa_address=?", [unit, aa_address]);
+
 				unlock();
 				return handle(null, unit);
 			}
@@ -639,8 +655,8 @@ function sendMessageAndPay(aa_address, message, payment_amount, handle){
 				return handle("wrong response from peer");
 			if (responseFromPeer.error){
 				await appDB.query("UPDATE channels SET amount_possibly_lost_by_me=amount_possibly_lost_by_me+? WHERE aa_address=?", [payment_amount, aa_address]);
-				if (responseFromPeer.error_code == "closing_initiated_by_peer")
-					await appDB.query("UPDATE channels SET status='closing_initiated_by_peer' WHERE aa_address=?", [aa_address]);
+			//	if (responseFromPeer.error_code == "closing_initiated_by_peer")
+			//		await appDB.query("UPDATE channels SET status='closing_initiated_by_peer' WHERE aa_address=?", [aa_address]);
 				return handle(responseFromPeer.error);
 			}
 			if (!responseFromPeer.response)
@@ -724,8 +740,9 @@ function sendDefinitionAndDepositToChannel(aa_address, arrDefinition, filling_am
 		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				reject("error when creating channel " + error);
-			else{
+			else {
 				await appDB.query("INSERT INTO my_deposits (unit, amount, aa_address) VALUES (?, ?, ?)", [unit, filling_amount, aa_address]);
+				await appDB.query("UPDATE channels SET last_unconfirmed_status_unit=?,unconfirmed_status='opened_by_me' WHERE aa_address=?", [unit, aa_address]);
 			}
 			resolve();
 		});
@@ -802,7 +819,7 @@ function createPaymentPackage(payment_amount, aa_address, handle){
 		if (!my_address)
 			return unlockAndHandle("not initialized");
 
-		const channels = await appDB.query("SELECT is_peer_ready,status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,\n\
+		const channels = await appDB.query("SELECT last_period_closed_by_me, is_peer_ready,status,period,peer_device_address,peer_url,amount_deposited_by_me,amount_spent_by_peer,\n\
 		amount_spent_by_me,is_known_by_peer,salt,timeout,asset FROM channels WHERE aa_address=?", [aa_address]);
 
 		if (channels.length === 0)
@@ -813,8 +830,8 @@ function createPaymentPackage(payment_amount, aa_address, handle){
 		if (channel.peer_device_address && conf.isHighAvailabilityNode)
 			return unlockAndHandle("device address cannot be used in high availability mode");
 
-		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged'
-		|| channel.status == 'confirmed_by_me')
+		const period = channel.status == 'closed' ? channel.period + 1 : channel.period; // if channel is closed, payment package is created for next period
+		if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || period === channel.last_period_closed_by_me)
 			return unlockAndHandle( "closing in progress");
 
 		const unconfirmedClosingUnitsRows = await appDB.query("SELECT 1 FROM unconfirmed_units_from_peer WHERE close_channel=1 AND aa_address=?", [aa_address]);
@@ -852,7 +869,7 @@ function createPaymentPackage(payment_amount, aa_address, handle){
 		const objPackage = { 
 			payment_amount: payment_amount, 
 			amount_spent: (payment_amount + channel.amount_spent_by_me), 
-			period: channel.status == 'closed' ? channel.period + 1 : channel.period, // if channel is closed, payment package is created for next period
+			period: period,
 			aa_address: aa_address 
 		};
 		if (channel.is_known_by_peer === 0) { // if channel is not known by peer, we add the parameters allowing him to save it on this side
@@ -937,13 +954,15 @@ function verifyPaymentPackage(objSignedPackage, handle){
 					return unlockAndHandle( "aa address not found");
 
 				const channel = channels[0];
-				if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me' || channel.status == 'closing_initiated_by_me_acknowledged')
+				if (channel.status == 'closing_initiated_by_peer' || channel.status == 'closing_initiated_by_me')
 					return unlockAndHandle( "closing initiated");
 				var amount_deposited_by_peer = channel.amount_deposited_by_peer;
 				if (channel.status == 'open' && channel.period != objSignedMessage.period)
 				return unlockAndHandle( "wrong period");
 				if (channel.status == 'closed' && (channel.period +1) != objSignedMessage.period)
 					return unlockAndHandle( "wrong period");
+				if (objSignedMessage.period === channel.last_period_closed_by_me)
+					return unlockAndHandle("period closed by me");
 
 				checkUnconfirmedStateAndGetSpendableAmountForChannel(conn, channel, objSignedMessage.aa_address, async function(error, unconfirmed_amount){
 					if (error)

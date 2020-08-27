@@ -23,11 +23,11 @@ function start(){
 	app.use(express.urlencoded());
 
 	app.get('/', async (req, res) => {
-		const channels = await appDB.query("SELECT status,amount_spent_by_me,amount_spent_by_peer,asset,peer_address,channels.aa_address,\n\
+		const channels = await appDB.query("SELECT unconfirmed_status,status,amount_spent_by_me,amount_spent_by_peer,asset,peer_address,channels.aa_address,\n\
 		amount_deposited_by_me,my_payments_count,peer_payments_count,close_timestamp,\n\
 		(SELECT amount FROM payments_sent WHERE payments_sent.aa_address=channels.aa_address ORDER BY ID DESC LIMIT 1) AS last_payment_sent_amount,\n\
 		(SELECT date FROM payments_sent WHERE payments_sent.aa_address=channels.aa_address ORDER BY ID DESC LIMIT 1) AS last_payment_sent_date,\n\
-		last_changing_status_unit,\n\
+		last_response_unit,last_unconfirmed_status_unit,\n\
 		IFNULL((SELECT SUM(amount) FROM my_deposits WHERE my_deposits.aa_address=channels.aa_address AND is_confirmed_by_aa=0),0) AS my_pending_deposit\n\
 		FROM channels LEFT JOIN unconfirmed_units_from_peer ON unconfirmed_units_from_peer.aa_address=unconfirmed_units_from_peer.aa_address\n\
 		");

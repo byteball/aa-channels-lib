@@ -28,6 +28,7 @@
 			<th>Asset</th>
 			<th>AA address</th>
 			<th>Status</th>
+			<th>Unconfirmed status</th>
 			<th>Amount spent by peer</th>
 			<th>Amount spent by me</th>
 			<th>Last payment from me</th>
@@ -45,38 +46,45 @@
 				<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].aa_address %>" target="_blank"><%= channels[k].aa_address %></a>
 			</td>
 			<td>
-			<% if (channels[k].status == 'closed'){ %>
-				<% if (channels[k].last_changing_status_unit){ %>
-					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_changing_status_unit %>" target="_blank">
-						closed
-					</a>
-				<% } else { %>
-						closed
-				<% } %>
-				<% if (channels[k].close_timestamp) { %>
-				on <%= new Date(channels[k].close_timestamp * 1000) %>
-				<% } %>
-			<% } else if (channels[k].status != 'open'){ %>
-				<%= channels[k].status.replace(/_/g,' ') %>
-			<% } %>
-			<% if (channels[k].status == 'open') { %>
-
+			<% if (channels[k].status == 'open' && channels[k].unconfirmed_status != 'closing_initiated_by_me') { %>
 				<form method="post" action="/">
 					<input name="aa_address" type="hidden" value="<%= channels[k].aa_address %>">
-					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_changing_status_unit %>" target="_blank">open</a>
+					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_response_unit %>" target="_blank">open</a>
 					<button type="submit" class="btn btn-primary btn-sm">Close</button>
 				</form>
-			<% }%>
+				<% } else { %>
+					<% if (channels[k].last_response_unit){ %>
+						<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_response_unit %>" target="_blank">
+							<%= channels[k].status.replace(/_/g,' ') %>
+						</a>
+					<% } else { %>
+						<%= channels[k].status.replace(/_/g,' ') %>
+					<% } %>
+					<% if (channels[k].close_timestamp && channels[k].status == 'closed') { %>
+						on <%= new Date(channels[k].close_timestamp * 1000).toLocaleDateString() + ' ' + new Date(channels[k].close_timestamp * 1000).toLocaleTimeString() %>
+					<% } %>
+				<% } %>
 
 			</td>
+
+			<td>
+				<% if (channels[k].unconfirmed_status) {%>
+					<% if (channels[k].last_unconfirmed_status_unit) { %>
+					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_unconfirmed_status_unit %>" target="_blank"><%= channels[k].unconfirmed_status.replace(/_/g,' ') %></a>
+					<% } else {%>
+					<%= channels[k].unconfirmed_status.replace(/_/g,' ') %>
+					<% } %>
+				<% } %>
+			</td>
+
 			<td><%= channels[k].amount_spent_by_peer %> in <%= channels[k].peer_payments_count %> payment<%= channels[k].peer_payments_count != 1 ? 's' :'' %></td>
 			<td><%= channels[k].amount_spent_by_me %> in <%= channels[k].my_payments_count %> payment<%= channels[k].my_payments_count != 1 ? 's' :'' %></td>
 			<td>
 				<% if (channels[k].my_payments_count > 0){ %>
-				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date) %>
+				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date).toLocaleDateString() + ' ' + new Date(channels[k].last_payment_sent_date).toLocaleTimeString() %>
 				<% } %>
 			</td>
-			<td><%= channels[k].amount_deposited_by_me + channels[k].my_pending_deposit %> (<%=channels[k].my_pending_deposit %>)</td>
+			<td><%= channels[k].amount_deposited_by_me %> (<%=channels[k].my_pending_deposit %>)</td>
 		</tr>
 		<% } %>
 	</tbody>

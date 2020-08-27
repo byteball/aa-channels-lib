@@ -28,10 +28,14 @@ db.query("CREATE TABLE IF NOT EXISTS channels (  \n\
 	period INTEGER DEFAULT 0,\n\
 	last_message_from_peer TEXT,\n\
 	last_event_id INTEGER DEFAULT 0,\n\
-	last_changing_status_unit CHAR(44) DEFAULT NULL,\n\
+	last_response_unit CHAR(44) DEFAULT NULL,\n\
+	last_unconfirmed_status_unit CHAR(44) DEFAULT NULL,\n\
 	is_definition_confirmed TINYINT DEFAULT 0,\n\
 	closing_authored TINYINT DEFAULT 0,\n\
 	status VARCHAR(30) DEFAULT 'closed',\n\
+	unconfirmed_status VARCHAR(30) DEFAULT 'closed',\n\
+	last_period_closed_by_me INTEGER DEFAULT 0,\n\
+	last_period_confirmed_by_me INTEGER DEFAULT 0,\n\
 	last_updated_mci INTEGER DEFAULT NULL,\n\
 	creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n\
 	UNIQUE KEY bySaltAndPeerAddressUnit(peer_address, salt)\n\

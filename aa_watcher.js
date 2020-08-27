@@ -64,6 +64,7 @@ eventBus.on('aa_response', function(objAAResponse){
 	if (objAAResponse.bounced) {
 		console.log("bounced unit: " + objAAResponse.trigger_unit);
 		appDB.query("DELETE FROM unconfirmed_units_from_peer WHERE unit=?", [objAAResponse.trigger_unit]);
+		appDB.query("UPDATE channels SET unconfirmed_status=NULL WHERE last_unconfirmed_status_unit=?", [objAAResponse.trigger_unit]);
 	}
 });
 
@@ -208,7 +209,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 					var amountRows = await connDagDb.query("SELECT SUM(amount) AS amount  FROM outputs WHERE unit=? AND address=?" + sqlAsset, [new_unit.unit, channel.aa_address]);
 					var amount = amountRows[0].amount;
 
-					var bHasDefinition, bHasData, bHasClose = false;
+					var bHasDefinition, bHasData, bHasClose, bHasConfirm = false;
 
 					var joint = await getJointFromCacheStorageOrHub(connDagDb, new_unit.unit);
 					if (joint){
@@ -220,6 +221,8 @@ function treatNewOutputsToChannels(channels, new_unit){
 								bHasData = true;
 								if (message.payload.close)
 									bHasClose = true;
+								if (message.payload.confirm || message.payload.fraud_proof)
+									bHasConfirm = true;
 							}
 						});
 					}
@@ -229,8 +232,12 @@ function treatNewOutputsToChannels(channels, new_unit){
 					var timestamp = Math.round(Date.now() / 1000); 
 
 					if (bHasClose) {
-						await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
+						await connAppDb.query("INSERT " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,close_channel,unit,timestamp) VALUES (?,1,?,?)",
 						[channel.aa_address,new_unit.unit, timestamp]);
+						await connAppDb.query("UPDATE channels SET unconfirmed_status='closing_initiated_by_peer',last_unconfirmed_status_unit=? WHERE aa_address=?",[new_unit.unit, channel.aa_address]);
+
+					} else if (bHasConfirm){
+						await connAppDb.query("UPDATE channels SET unconfirmed_status='closing_confirmed_by_peer',last_unconfirmed_status_unit=? WHERE aa_address=?",[new_unit.unit, channel.aa_address]);
 					} else {
 						var unconfirmedUnitsRows = await connAppDb.query("SELECT close_channel,has_definition FROM unconfirmed_units_from_peer WHERE aa_address=?", [channel.aa_address]);
 						var bAlreadyBeenClosed = unconfirmedUnitsRows.some(function(row){return row.close_channel});
@@ -240,6 +247,7 @@ function treatNewOutputsToChannels(channels, new_unit){
 						(lockedChannel.asset != 'base' || byteAmount > 10000)) { // deposit in bytes are possible only over 10000
 							await connAppDb.query("INSERT  " + connAppDb.getIgnore() + " INTO unconfirmed_units_from_peer (aa_address,amount,unit,has_definition,timestamp) VALUES (?,?,?,?,?)",
 							[channel.aa_address, amount, new_unit.unit, bHasDefinition ? 1 : 0, timestamp]);
+							await connAppDb.query("UPDATE channels SET unconfirmed_status='opened_by_peer',last_unconfirmed_status_unit=? WHERE aa_address=?",[new_unit.unit, channel.aa_address]);
 						}
 					}
 				}
@@ -384,7 +392,7 @@ function treatUnitFromAA(new_unit){
 						period: payload.period, 
 						amount_deposited_by_peer: payload[channel.peer_address], 
 						amount_deposited_by_me: payload[my_address],
-						last_changing_status_unit: new_unit.unit,
+						last_response_unit: new_unit.unit,
 					}
 				);
 				if (payload[my_address] > 0)
@@ -396,9 +404,9 @@ function treatUnitFromAA(new_unit){
 			//closing requested by one party
 			if (payload.closing && channel.last_event_id < payload.event_id){ // if outdated, do nothing
 				if (payload.initiated_by === my_address)
-					var status = "closing_initiated_by_me_acknowledged";
+					var status = "closing_initiated_by_me";
 				else {
-					var status = "confirmed_by_me";
+					var status = "closing_initiated_by_peer";
 					if (payload[channel.peer_address] >= channel.amount_spent_by_peer){
 						confirmClosing(new_unit.author_address, payload.period, channel.overpayment_from_peer); //peer is honest, we send confirmation for closing
 					} else {
@@ -410,9 +418,8 @@ function treatUnitFromAA(new_unit){
 						status: status, 
 						period: payload.period, 
 						close_timestamp: new_unit.timestamp,
-						last_changing_status_unit: new_unit.unit,
-					})
-				;
+						last_response_unit: new_unit.unit,
+					});
 			}
 			//AA confirms that channel is closed
 			if (payload.closed){
@@ -429,7 +436,8 @@ function treatUnitFromAA(new_unit){
 						amount_possibly_lost_by_me: 0,
 						my_payments_count: 0,
 						peer_payments_count: 0,
-						last_message_from_peer: ''
+						last_message_from_peer: '',
+						last_response_unit: new_unit.unit,
 					});
 				const rows = await connDagDb.query("SELECT SUM(amount) AS amount FROM outputs WHERE unit=? AND address=?", [new_unit.unit, my_address]);
 				if (payload.fraud_proof)
@@ -444,6 +452,9 @@ function treatUnitFromAA(new_unit){
 					eventBus.emit("refused_deposit", payload.trigger_unit);
 				//await setLastUpdatedMciAndEventIdAndOtherFields({});
 			}
+
+			await	connAppDb.query("UPDATE channels SET unconfirmed_status=NULL WHERE last_unconfirmed_status_unit IN (SELECT trigger_unit FROM aa_responses WHERE response_unit=?)", [new_unit.unit]);
+
 			if (conf.isHighAvailabilityNode)
 				await	connAppDb.query("DO RELEASE_LOCK(?)",[new_unit.author_address]);
 			connAppDb.release();
@@ -456,10 +467,10 @@ function treatUnitFromAA(new_unit){
 // check if frontend authored a closing request, used only in high availability mode
 function treatClosingRequests(){
 	mutex.lockOrSkip(['treatClosingRequests'], async function(unlock){
-		const rows = await appDB.query("SELECT status,aa_address,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE closing_authored=1");
-		if (rows.length === 0)
+		const channels = await appDB.query("SELECT last_period_closed_by_me,status,aa_address,amount_spent_by_peer,amount_spent_by_me,last_message_from_peer, period FROM channels WHERE closing_authored=1");
+		if (channels.length === 0)
 			return unlock();
-		async.eachSeries(rows, function(row, cb){
+		async.eachSeries(channels, function(channel, cb){
 			closeUnderLock(row,cb);
 		},
 		unlock
@@ -467,26 +478,40 @@ function treatClosingRequests(){
 	});
 }
 
-async function closeUnderLock(row, cb){
+async function closeUnderLock(channel, cb){
 	if (!conf.isHighAvailabilityNode)
 		throw Error("closing request not in high availability mode");
 
 	var connAppDB = await appDB.takeConnectionFromPool();
-	var results = await connAppDB.query("SELECT GET_LOCK(?,1) as my_lock",[row.aa_address]);
+	var results = await connAppDB.query("SELECT GET_LOCK(?,1) as my_lock",[channel.aa_address]);
 	if (!results[0].my_lock || results[0].my_lock === 0){
 		connAppDB.release();
 		cb();
-		return console.log("couldn't get lock from MySQL " + row.aa_address);
+		return console.log("couldn't get lock from MySQL " + channel.aa_address);
+	}
+	
+	if (channel.status != 'open'){
+		connAppDB.release();
+		cb();
+		return console.log("Cannot close channel while it is not confirmed open");
+	}
+
+	const closing_period = channel.status == 'closed' ? channel.period + 1 : channel.period;
+
+	if (channel.last_period_closed_by_me === closing_period) {
+		connAppDB.release();
+		cb();
+		return console.log("Period already closed by me");
 	}
 
 	const payload = {
 		close: 1, 
-		period: row.status == 'closed' ? row.period + 1 : row.period
+		period: closing_period
 	};
-	if (row.amount_spent_by_me > 0)
-		payload.transferredFromMe = row.amount_spent_by_me;
-	if (row.amount_spent_by_peer > 0)
-		payload.sentByPeer = JSON.parse(row.last_message_from_peer);
+	if (channel.amount_spent_by_me > 0)
+		payload.transferredFromMe = channel.amount_spent_by_me;
+	if (channel.amount_spent_by_peer > 0)
+		payload.sentByPeer = JSON.parse(channel.last_message_from_peer);
 
 	const options = {
 		messages: [{
@@ -496,17 +521,19 @@ async function closeUnderLock(row, cb){
 			payload: payload
 		}],
 		change_address: my_address,
-		base_outputs: [{ address: row.aa_address, amount: 10000 }]
+		base_outputs: [{ address: channel.aa_address, amount: 10000 }]
 	}
 
 	headlessWallet.sendMultiPayment(options, async function(error, unit){
 		if (error)
 			console.log("error when closing channel " + error);
 		else{
-			await connAppDB.query("UPDATE channels SET closing_authored=0 WHERE aa_address=?", [row.aa_address]);
-			await connAppDB.query("UPDATE channels SET status='closing_initiated_by_me' WHERE aa_address=? AND (status='open')", [row.aa_address]);
+			await connAppDB.query("UPDATE channels SET closing_authored=0 WHERE aa_address=?", [channel.aa_address]);
+			await connAppDB.query("UPDATE channels SET last_unconfirmed_status_unit=?,unconfirmed_status='closing_initiated_by_me',last_period_closed_by_me=? WHERE aa_address=?", [unit, closing_period,channel.aa_address]);
 		}
-		await connAppDB.query("DO RELEASE_LOCK(?)",[row.aa_address]);
+
+
+		await connAppDB.query("DO RELEASE_LOCK(?)",[channel.aa_address]);
 		await connAppDB.release();
 		cb();
 	});
@@ -537,8 +564,10 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 		headlessWallet.sendMultiPayment(options, async function(error, unit){
 			if (error)
 				console.log("error when closing channel " + error);
-			else
-				await appDB.query("UPDATE channels SET status='confirmed_by_me' WHERE aa_address=? AND period=?", [aa_address, period]);
+			else {
+				await appDB.query("UPDATE channels SET last_period_confirmed_by_me=? WHERE aa_address=?", [period, aa_address]);
+				await appDB.query("UPDATE channels SET unconfirmed_status='closing_confirmed_by_me',last_unconfirmed_status_unit=? WHERE aa_address=?",[unit, aa_address]);
+			}
 			unlock();
 		});
 	});
@@ -546,7 +575,8 @@ function confirmClosing(aa_address, period, overpayment_from_peer, fraud_proof){
 
 async function confirmClosingIfTimeoutReached(){
 	const current_ts = Math.round(Date.now() / 1000);
-	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE status='closing_initiated_by_me_acknowledged' AND close_timestamp < (? - timeout)", [current_ts]);
+	const rows = await appDB.query("SELECT aa_address,period FROM channels WHERE period>last_period_confirmed_by_me AND \n\
+	(status='closing_initiated_by_me' OR status='closing_initiated_by_peer') AND close_timestamp < (? - timeout)", [current_ts]);
 	rows.forEach(function(row){
 		confirmClosing(row.aa_address, row.period);
 	});
