@@ -61,7 +61,7 @@
 						<%= channels[k].status.replace(/_/g,' ') %>
 					<% } %>
 					<% if (channels[k].close_timestamp && channels[k].status == 'closed') { %>
-						on <%= new Date(channels[k].close_timestamp * 1000).toLocaleDateString() + ' ' + new Date(channels[k].close_timestamp * 1000).toLocaleTimeString() %>
+						on <%= new Date(channels[k].close_timestamp * 1000).toLocaleString() %>
 					<% } %>
 				<% } %>
 
@@ -81,7 +81,7 @@
 			<td><%= channels[k].amount_spent_by_me %> in <%= channels[k].my_payments_count %> payment<%= channels[k].my_payments_count != 1 ? 's' :'' %></td>
 			<td>
 				<% if (channels[k].my_payments_count > 0){ %>
-				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date).toLocaleDateString() + ' ' + new Date(channels[k].last_payment_sent_date).toLocaleTimeString() %>
+				<%= channels[k].last_payment_sent_amount %> on <%= new Date(channels[k].last_payment_sent_date * 1000).toLocaleString() %>
 				<% } %>
 			</td>
 			<td><%= channels[k].amount_deposited_by_me %> (<%=channels[k].my_pending_deposit %>)</td>
