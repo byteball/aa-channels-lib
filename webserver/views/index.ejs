@@ -52,21 +52,20 @@
 					<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_response_unit %>" target="_blank">open</a>
 					<button type="submit" class="btn btn-primary btn-sm">Close</button>
 				</form>
+			<% } else if (channels[k].status == 'closed') { %>
+				<% if (channels[k].close_timestamp) { %>
+					closed on <%= new Date(channels[k].close_timestamp * 1000).toLocaleString() %>
 				<% } else { %>
-					<% if (channels[k].last_response_unit){ %>
-						<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_response_unit %>" target="_blank">
-							<%= channels[k].status.replace(/_/g,' ') %>
-						</a>
-					<% } else { %>
-						<%= channels[k].status.replace(/_/g,' ') %>
-					<% } %>
-					<% if (channels[k].close_timestamp && channels[k].status == 'closed') { %>
-						on <%= new Date(channels[k].close_timestamp * 1000).toLocaleString() %>
-					<% } %>
+					never opened
 				<% } %>
-
+			<% } else if (channels[k].last_response_unit) { %>
+				<a href="https://<%= process.env.testnet ? 'testnet' : '' %>explorer.obyte.org/#<%= channels[k].last_response_unit %>" target="_blank">
+					<%= channels[k].status.replace(/_/g,' ') %>
+				</a>
+			<% } else { %>
+					<%= channels[k].status.replace(/_/g,' ') %>
+			<% } %>
 			</td>
-
 			<td>
 				<% if (channels[k].unconfirmed_status) {%>
 					<% if (channels[k].last_unconfirmed_status_unit) { %>
